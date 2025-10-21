@@ -49,13 +49,26 @@ impl PostgresPoolConfig {
     /// Create configuration optimized for high-frequency trading
     pub fn hft_optimized() -> Self {
         Self {
-            min_connections: 10,
-            max_connections: 200, // Very high for HFT
+            min_connections: 20,              // Higher minimum for instant availability
+            max_connections: 300,             // Very high for HFT (increased from 200)
+            max_lifetime: Duration::from_secs(7200), // 2 hours (longer to reduce churn)
+            idle_timeout: Duration::from_secs(600),   // 10 minutes (increased stability)
+            connect_timeout: Duration::from_secs(3),  // Faster timeout (reduced from 5s)
+            test_before_acquire: false,       // Disable for maximum speed
+            acquire_timeout: Duration::from_secs(1),  // Very fast timeout (reduced from 2s)
+        }
+    }
+    
+    /// Create configuration for ultra-low-latency HFT (aggressive settings)
+    pub fn hft_ultra_low_latency() -> Self {
+        Self {
+            min_connections: 50,              // Very high minimum
+            max_connections: 500,             // Maximum for extreme workloads
             max_lifetime: Duration::from_secs(3600), // 1 hour
-            idle_timeout: Duration::from_secs(300), // 5 minutes
-            connect_timeout: Duration::from_secs(5),
-            test_before_acquire: false, // Disable for speed
-            acquire_timeout: Duration::from_secs(2), // Fast timeout
+            idle_timeout: Duration::from_secs(300),   // 5 minutes
+            connect_timeout: Duration::from_millis(500), // 500ms
+            test_before_acquire: false,       // Never test (maximum speed)
+            acquire_timeout: Duration::from_millis(500), // 500ms
         }
     }
     

@@ -58,14 +58,15 @@ mod tests {
         
         let opportunity = ArbitrageOpportunity {
             id: "test-feature-extraction".to_string(),
-            arb_type: ArbitrageType::CrossExchange,
+            opportunity_type: "CrossExchange".to_string(),
             pair: TradingPair::new("ETH".to_string(), "USDT".to_string()),
             buy_exchange: "binance".to_string(),
             sell_exchange: "okx".to_string(),
             buy_price: Decimal::new(2000, 0),
             sell_price: Decimal::new(2015, 0),
-            quantity: Decimal::new(15, 1), // 1.5 ETH
-            expected_profit: Decimal::new(15, 0),
+            max_quantity: Decimal::new(15, 1), // 1.5 ETH
+            profit_amount: Decimal::new(15, 0),
+            profit_percentage: Decimal::new(75, 4), // 0.0075 = 0.75%
             confidence: 0.82,
             timestamp: chrono::Utc::now(),
         };
@@ -178,14 +179,15 @@ mod tests {
         for (desc, profit, confidence) in opportunities {
             let opportunity = ArbitrageOpportunity {
                 id: format!("test-{}", desc),
-                arb_type: ArbitrageType::CrossExchange,
+                opportunity_type: "CrossExchange".to_string(),
                 pair: TradingPair::new("BTC".to_string(), "USDT".to_string()),
                 buy_exchange: "binance".to_string(),
                 sell_exchange: "okx".to_string(),
                 buy_price: Decimal::new(40000, 0),
                 sell_price: Decimal::new(40000, 0) + profit,
-                quantity: Decimal::new(1, 1),
-                expected_profit: profit,
+                max_quantity: Decimal::new(1, 1),
+                profit_amount: profit,
+                profit_percentage: profit / Decimal::new(40000, 0),
                 confidence,
                 timestamp: chrono::Utc::now(),
             };

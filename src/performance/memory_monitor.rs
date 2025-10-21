@@ -10,21 +10,25 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::time::interval;
 use tracing::{info, warn, error, debug};
-use sysinfo::{System, SystemExt, ProcessExt, Pid, PidExt};
+use sysinfo::{System, Pid};
 
 /// Memory usage statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryStats {
     /// Current memory usage in bytes
+    #[serde(default)]
     pub current_usage_bytes: u64,
     
     /// Peak memory usage in bytes
+    #[serde(default)]
     pub peak_usage_bytes: u64,
     
     /// Memory usage percentage of system total
+    #[serde(default)]
     pub usage_percentage: f64,
     
     /// Virtual memory size in bytes
+    #[serde(default)]
     pub virtual_memory_bytes: u64,
     
     /// RSS (Resident Set Size) in bytes
@@ -39,9 +43,26 @@ pub struct MemoryStats {
     /// Memory growth rate (bytes per second)
     pub growth_rate_per_sec: f64,
     
-    /// Time since last measurement (skip serialization)
+    /// Time since last measurement (skip serialization/deserialization)
     #[serde(skip)]
+    #[serde(default = "Instant::now")]
     pub measurement_timestamp: Instant,
+}
+
+impl Default for MemoryStats {
+    fn default() -> Self {
+        Self {
+            current_usage_bytes: 0,
+            peak_usage_bytes: 0,
+            usage_percentage: 0.0,
+            virtual_memory_bytes: 0,
+            rss_bytes: 0,
+            available_memory_bytes: 0,
+            total_memory_bytes: 0,
+            growth_rate_per_sec: 0.0,
+            measurement_timestamp: Instant::now(),
+        }
+    }
 }
 
 /// Memory leak detection result
@@ -154,7 +175,7 @@ impl MemoryMonitor {
         let mut system = System::new_all();
         system.refresh_all();
         
-        let pid = sysinfo::get_current_pid().expect("Failed to get current PID");
+        let pid = Pid::from_u32(std::process::id());
         
         let initial_stats = MemoryStats {
             current_usage_bytes: 0,

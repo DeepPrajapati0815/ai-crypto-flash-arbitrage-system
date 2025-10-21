@@ -7,7 +7,7 @@ use ethers_core::types::H256;
 use anyhow::Result;
 use rust_decimal::Decimal;
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
-use tracing::{info, error, debug};
+use tracing::{info, warn, error, debug};
 use chrono::{DateTime, Utc, NaiveDate};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -94,9 +94,36 @@ impl PostgresManager {
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Failed to connect to database after {} attempts", max_retries)))
     }
     
-    /// Create PostgresManager optimized for HFT workloads
+    /// Create PostgresManager optimized for HFT workloads with pre-warming
     pub async fn new_hft_optimized(database_url: &str) -> Result<Self> {
-        Self::new_with_config(database_url, PostgresPoolConfig::hft_optimized()).await
+        let manager = Self::new_with_config(database_url, PostgresPoolConfig::hft_optimized()).await?;
+        
+        // Pre-warm connections by executing simple queries
+        manager.prewarm_connections().await?;
+        
+        Ok(manager)
+    }
+    
+    /// Pre-warm database connections for optimal performance
+    async fn prewarm_connections(&self) -> Result<()> {
+        info!("Pre-warming database connections for HFT workload...");
+        
+        // Execute simple queries to warm up the connection pool
+        let prewarm_queries = vec![
+            "SELECT 1",
+            "SELECT NOW()",
+            "SELECT version()",
+        ];
+        
+        for query in prewarm_queries {
+            match sqlx::query(query).fetch_one(&self.pool).await {
+                Ok(_) => debug!("Pre-warmed query: {}", query),
+                Err(e) => warn!("Failed to pre-warm query '{}': {}", query, e),
+            }
+        }
+        
+        info!("✅ Database connections pre-warmed successfully");
+        Ok(())
     }
 
     /// Get a reference to the connection pool

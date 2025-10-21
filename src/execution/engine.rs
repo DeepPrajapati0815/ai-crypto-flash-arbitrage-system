@@ -2,6 +2,7 @@
 
 use crate::core::types::{ArbitrageOpportunity, Order, OrderSide, OrderType, OrderStatus, TradingPair, Decimal};
 use crate::exchanges::{UnifiedExchangeManager, ExchangeConfig};
+use crate::execution::nonce_manager::NonceManager;
 use anyhow::Result;
 use std::sync::Arc;
 use std::collections::VecDeque;
@@ -10,6 +11,7 @@ use tracing::{info, debug, error, warn};
 use uuid::Uuid;
 use chrono::Utc;
 use rand;
+use ethers_core::types::Address;
 
 /// Execution engine for high-frequency trading with memory-bounded order tracking
 pub struct ExecutionEngine {
@@ -18,6 +20,8 @@ pub struct ExecutionEngine {
     max_concurrent_orders: u32,
     max_completed_orders: usize,
     exchange_manager: Arc<RwLock<UnifiedExchangeManager>>,
+    nonce_manager: Arc<NonceManager>,
+    evm_wallet_address: Option<Address>,
 }
 
 impl ExecutionEngine {
@@ -32,6 +36,43 @@ impl ExecutionEngine {
             max_concurrent_orders,
             max_completed_orders,
             exchange_manager: Arc::new(RwLock::new(UnifiedExchangeManager::new())),
+            nonce_manager: Arc::new(NonceManager::new()),
+            evm_wallet_address: None,
+        }
+    }
+
+    /// Set EVM wallet address for nonce management
+    pub async fn set_evm_wallet(&mut self, address: Address, current_nonce: u64) -> Result<()> {
+        self.evm_wallet_address = Some(address);
+        self.nonce_manager.initialize(address, current_nonce).await?;
+        info!("ExecutionEngine: EVM wallet initialized at {:?} with nonce {}", address, current_nonce);
+        Ok(())
+    }
+
+    /// Get next EVM nonce for transaction (thread-safe, prevents race conditions)
+    pub async fn get_next_evm_nonce(&self) -> Result<u64> {
+        if let Some(address) = self.evm_wallet_address {
+            self.nonce_manager.get_next_nonce(address).await
+        } else {
+            Err(anyhow::anyhow!("EVM wallet not initialized"))
+        }
+    }
+
+    /// Confirm EVM nonce (transaction mined)
+    pub async fn confirm_evm_nonce(&self, nonce: u64) -> Result<()> {
+        if let Some(address) = self.evm_wallet_address {
+            self.nonce_manager.confirm_nonce(address, nonce).await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Release EVM nonce (transaction failed)
+    pub async fn release_evm_nonce(&self, nonce: u64) -> Result<()> {
+        if let Some(address) = self.evm_wallet_address {
+            self.nonce_manager.release_nonce(address, nonce).await
+        } else {
+            Ok(())
         }
     }
 
@@ -389,6 +430,12 @@ impl ExecutionEngine {
     pub async fn get_healthy_exchanges(&self) -> Vec<String> {
         let manager = self.exchange_manager.read().await;
         manager.get_healthy_exchanges().await
+    }
+    
+    /// Get count of active orders (for concurrency limiting)
+    pub async fn get_active_order_count(&self) -> usize {
+        let active_orders = self.active_orders.read().await;
+        active_orders.len()
     }
 }
 

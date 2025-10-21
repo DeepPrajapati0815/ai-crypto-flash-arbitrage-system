@@ -254,7 +254,9 @@ impl NeuralNetworkManager {
             let mut batch_count = 0;
 
             // Process data in batches with real production logic
-            for batch in self.training_data.chunks(batch_size) {
+            // Convert VecDeque to Vec for chunking
+            let training_vec: Vec<_> = self.training_data.iter().cloned().collect();
+            for batch in training_vec.chunks(batch_size) {
                 let batch_loss = Self::train_batch_production_static(network, batch).await?;
                 total_loss += batch_loss;
                 batch_count += 1;
@@ -553,7 +555,7 @@ impl NeuralNetworkManager {
 
     /// Add training data
     pub fn add_training_data(&mut self, sample: TrainingSample) {
-        self.training_data.push(sample);
+        self.training_data.push_back(sample);
         
         // Keep only recent data (last 10000 samples)
         if self.training_data.len() > 10000 {

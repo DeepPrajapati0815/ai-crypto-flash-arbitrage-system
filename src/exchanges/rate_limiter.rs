@@ -1,7 +1,6 @@
 //! Rate limiting for exchange API calls
 
-use governor::{Quota, RateLimiter, clock::DefaultClock, state::InMemoryState};
-use governor::middleware::NoOpMiddleware;
+use governor::{Quota, RateLimiter, clock::DefaultClock, state::{InMemoryState, NotKeyed}};
 use std::sync::Arc;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -19,7 +18,7 @@ pub enum RequestPriority {
 /// Rate limiter for a single exchange
 pub struct ExchangeRateLimiter {
     name: String,
-    main_limiter: Arc<RateLimiter<governor::NotKeyed, InMemoryState, DefaultClock, NoOpMiddleware>>,
+    main_limiter: Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     requests_per_second: u32,
 }
 

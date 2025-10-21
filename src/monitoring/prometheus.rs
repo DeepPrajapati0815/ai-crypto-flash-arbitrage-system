@@ -257,13 +257,14 @@ where
 
 /// Update system metrics (memory, CPU)
 pub fn update_system_metrics() {
-    use sysinfo::{System, SystemExt, ProcessExt};
+    use sysinfo::{System, Pid};
     
     let mut sys = System::new_all();
     sys.refresh_all();
     
-    // Get current process
-    if let Some(process) = sys.process(sysinfo::get_current_pid().unwrap()) {
+    // Get current process (API changed in sysinfo v0.30+)
+    let current_pid = Pid::from_u32(std::process::id());
+    if let Some(process) = sys.process(current_pid) {
         // Memory usage in MB
         let memory_mb = process.memory() / 1024 / 1024;
         MEMORY_USAGE_MB.set(memory_mb as i64);

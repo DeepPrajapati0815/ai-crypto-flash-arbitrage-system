@@ -80,14 +80,15 @@ mod tests {
         
         let opportunity = ArbitrageOpportunity {
             id: "test-opp-1".to_string(),
-            arb_type: ArbitrageType::CrossExchange,
+            opportunity_type: "CrossExchange".to_string(),
             pair,
             buy_exchange: "binance".to_string(),
             sell_exchange: "okx".to_string(),
             buy_price: Decimal::from_str("2000.0").unwrap(),
             sell_price: Decimal::from_str("2010.0").unwrap(),
-            quantity: Decimal::from_str("1.0").unwrap(),
-            expected_profit: Decimal::from_str("10.0").unwrap(),
+            max_quantity: Decimal::from_str("1.0").unwrap(),
+            profit_amount: Decimal::from_str("10.0").unwrap(),
+            profit_percentage: Decimal::from_str("0.005").unwrap(), // 0.5%
             confidence: 0.85,
             timestamp: chrono::Utc::now(),
         };

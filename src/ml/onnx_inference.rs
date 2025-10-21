@@ -1,9 +1,9 @@
 //! ONNX Runtime inference for production ML models
 
 use anyhow::{Result, Context};
-use ort::{Environment, SessionBuilder, Value, GraphOptimizationLevel, ExecutionProvider};
-use std::sync::Arc;
-use tracing::{info, warn, error, debug};
+use ort::{Environment, SessionBuilder, Value, GraphOptimizationLevel};
+use ndarray::{Array2, ArrayD, CowArray, IxDyn};
+use tracing::{info, debug};
 
 /// ONNX model predictor for arbitrage opportunity scoring
 pub struct ONNXPredictor { 
@@ -38,9 +38,10 @@ impl ONNXPredictor {
         let output_name = session.outputs[0].name.clone();
         
         // Get input size
-        let input_size = match &session.inputs[0].dimensions {
-            Some(dims) if dims.len() >= 2 => dims[1] as usize,
-            _ => 50, // Default to 50 features
+        let input_size = if session.inputs[0].dimensions.len() >= 2 {
+            session.inputs[0].dimensions[1].unwrap_or(50) as usize
+        } else {
+            50 // Default to 50 features
         };
         
         info!("✅ ONNX model loaded successfully");
@@ -66,12 +67,11 @@ impl ONNXPredictor {
             ));
         }
         
-        // Create input tensor [1, input_size]
-        let input_shape = vec![1, self.input_size];
-        let input_tensor = Value::from_array(
-            self.session.allocator(),
-            &[features]
-        )?;
+        // Create input tensor [1, input_size] with dynamic dimensions
+        let array = Array2::from_shape_vec((1, self.input_size), features.to_vec())?;
+        let dyn_array: ArrayD<f32> = array.into_dyn();
+        let cow_array: CowArray<f32, IxDyn> = CowArray::from(dyn_array.view());
+        let input_tensor = Value::from_array(self.session.allocator(), &cow_array)?;
         
         // Run inference
         let outputs = self.session.run(vec![input_tensor])?;
@@ -109,24 +109,18 @@ impl ONNXPredictor {
             flattened.extend_from_slice(features);
         }
         
-        // Create input tensor [batch_size, input_size]
-        let input_shape = vec![batch_size, self.input_size];
-        
-        // Reshape flattened into 2D array
-        let batch_2d: Vec<&[f32]> = (0..batch_size)
-            .map(|i| &flattened[i * self.input_size..(i + 1) * self.input_size])
-            .collect();
-        
-        let input_tensor = Value::from_array(
-            self.session.allocator(),
-            &batch_2d
-        )?;
+        // Create input tensor [batch_size, input_size] with dynamic dimensions
+        let array = Array2::from_shape_vec((batch_size, self.input_size), flattened)?;
+        let dyn_array: ArrayD<f32> = array.into_dyn();
+        let cow_array: CowArray<f32, IxDyn> = CowArray::from(dyn_array.view());
+        let input_tensor = Value::from_array(self.session.allocator(), &cow_array)?;
         
         // Run inference
         let outputs = self.session.run(vec![input_tensor])?;
         
         // Extract predictions
-        let output_view = outputs[0].try_extract::<f32>()?.view();
+        let output_tensor = outputs[0].try_extract::<f32>()?;
+        let output_view = output_tensor.view();
         let predictions: Vec<f32> = (0..batch_size)
             .map(|i| output_view[[i, 0]])
             .collect();

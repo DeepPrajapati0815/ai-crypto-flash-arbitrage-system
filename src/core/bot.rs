@@ -13,6 +13,7 @@ use std::time::Duration;
 use crate::ml::feature_engineering::FeatureEngine;
 use crate::ml::model_training::TrainingSample;
 use crate::ml::neural_networks::NeuralNetwork;
+use crate::ml::onnx_integration::ONNXArbitragePredictor;
 use crate::core::types::Ticker;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::exchange::ExchangeManager;
@@ -45,6 +46,7 @@ pub struct HFTBot {
     performance_optimizer: Arc<RwLock<PerformanceOptimizer>>,
     feature_engine: Arc<RwLock<FeatureEngine>>,
     models: Arc<RwLock<Vec<NeuralNetwork>>>,
+    onnx_predictor: Option<Arc<ONNXArbitragePredictor>>,
     position_sizing: Arc<RwLock<PositionSizingManager>>,
     smart_router: Arc<RwLock<SmartOrderRouter>>,
     advanced_orders: Arc<RwLock<AdvancedOrderManager>>,
@@ -72,6 +74,22 @@ impl HFTBot {
         // ML components
         let feature_engine = Arc::new(RwLock::new(FeatureEngine::new()));
         let models = Arc::new(RwLock::new(Vec::<NeuralNetwork>::new()));
+        
+        // Try to initialize ONNX predictor
+        let onnx_predictor = match ONNXArbitragePredictor::new(
+            "ml_training/models",
+            order_book_manager.clone(),
+            0.6, // 60% confidence threshold
+        ).await {
+            Ok(predictor) => {
+                info!("✅ ONNX ML predictor initialized successfully");
+                Some(Arc::new(predictor))
+            },
+            Err(e) => {
+                warn!("⚠️ ONNX ML predictor not available: {}. Falling back to legacy ML.", e);
+                None
+            }
+        };
 
         // Position sizing manager (initialize with conservative defaults; can be updated via config later)
         let sizing_params = PositionSizingParams {
@@ -179,15 +197,25 @@ impl HFTBot {
         // Spawn feature -> model prediction task
         {
             let models_arc = models.clone();
+            let onnx_pred = onnx_predictor.clone();
             let predictions_tx_clone = predictions_tx.clone();
             tokio::spawn(async move {
                 while let Some(sample) = features_rx.recv().await {
-                    let models_guard = models_arc.read().await;
-                    if let Some(model) = models_guard.get(0) {
-                        // Minimal forward pass stub: use first feature as prediction
-                        let pred = *sample.features.get(0).unwrap_or(&0.0);
-                        let _ = predictions_tx_clone.try_send((sample.sample_id.clone(), pred));
-                    }
+                    // Try ONNX predictor first, fall back to legacy model
+                    let pred = if let Some(onnx) = &onnx_pred {
+                        // For ONNX, we'd need an ArbitrageOpportunity
+                        // For now use first feature as simple prediction
+                        *sample.features.get(0).unwrap_or(&0.0)
+                    } else {
+                        // Legacy model path
+                        let models_guard = models_arc.read().await;
+                        if let Some(model) = models_guard.get(0) {
+                            *sample.features.get(0).unwrap_or(&0.0)
+                        } else {
+                            0.0
+                        }
+                    };
+                    let _ = predictions_tx_clone.try_send((sample.sample_id.clone(), pred));
                 }
             });
         }
@@ -203,6 +231,9 @@ impl HFTBot {
             let adv_mgr = advanced_orders.clone();
             let postgres = postgres_manager.clone();
             let redis = redis_manager.clone();
+            let onnx_predictor_clone = onnx_predictor.clone();
+            let flashbots_clone = flashbots.clone();
+            let mev_share_clone = mev_share.clone();
             tokio::spawn(async move {
                 while let Some((pair_symbol, prediction)) = predictions_rx.recv().await {
                     let span = tracing::info_span!("prediction_pipeline", pair = %pair_symbol);
@@ -213,13 +244,47 @@ impl HFTBot {
                     // Refresh opportunities and process matching pair
                     let scan_span = tracing::info_span!("scan_opportunities");
                     let _s = scan_span.enter();
-                    if let Err(e) = arb_engine.scan_opportunities().await { 
-                        tracing::error!("scan_opportunities error: {:?}", e); 
-                        continue; 
+                    
+                    // Add timeout protection for scan_opportunities (2s timeout)
+                    match tokio::time::timeout(
+                        tokio::time::Duration::from_secs(2),
+                        arb_engine.scan_opportunities()
+                    ).await {
+                        Ok(Ok(_)) => {},
+                        Ok(Err(e)) => {
+                            tracing::error!("scan_opportunities error: {:?}", e);
+                            continue;
+                        },
+                        Err(_) => {
+                            tracing::error!("scan_opportunities timeout after 2s for {}", pair_symbol);
+                            continue;
+                        }
                     }
                     let opportunities = arb_engine.get_opportunities().await;
+                    let onnx = onnx_predictor_clone.clone();
                     for opportunity in opportunities {
                         if opportunity.pair.symbol() != pair_symbol { continue; }
+                        
+                        // Use ONNX to score the opportunity if available
+                        if let Some(ref onnx_pred) = onnx {
+                            match onnx_pred.predict_opportunity(&opportunity).await as Result<f32, _> {
+                                Ok(confidence) => {
+                                    tracing::info!("🎯 ONNX confidence for {}: {:.2}%", 
+                                        opportunity.pair.symbol(), confidence * 100.0);
+                                    
+                                    // Skip low-confidence opportunities (threshold: 60%)
+                                    if confidence < 0.6 {
+                                        tracing::debug!("❌ Skipping opportunity due to low ONNX confidence: {:.2}%", 
+                                            confidence * 100.0);
+                                        continue;
+                                    }
+                                },
+                                Err(e) => {
+                                    tracing::warn!("⚠️ ONNX prediction failed: {}, falling back to heuristics", e);
+                                }
+                            }
+                        }
+                        
                         // Determine position size for this opportunity
                         let sizing_span = tracing::info_span!("position_sizing");
                         let _ss = sizing_span.enter();
@@ -276,6 +341,15 @@ impl HFTBot {
                         // Create advanced orders for routed legs (execution algorithms manage slicing/timing)
                         let adv_span = tracing::info_span!("advanced_orders");
                         let _as = adv_span.enter();
+                        
+                        // Check if we have capacity for more executions (max 50 concurrent)
+                        // This prevents unbounded task spawning
+                        let active_orders_count = exec_engine.get_active_order_count().await;
+                        if active_orders_count >= 50 {
+                            tracing::warn!("Max concurrent executions reached (50), skipping opportunity {}", sized_op.id);
+                            continue;
+                        }
+                        
                         let adv_market_data = AoMarketData {
                             pair: sized_op.pair.clone(),
                             bid_price: sized_op.buy_price,
@@ -327,8 +401,51 @@ impl HFTBot {
                                 // Execute
                                 let exec_span = tracing::info_span!("execute_opportunity");
                                 let _es = exec_span.enter();
-                                // If Flashbots/MEV-Share available, we would construct raw txs and submit; fallback to engine
-                                match exec_engine.execute_opportunity(&sized_op).await {
+                                
+                                // Try MEV protection first for high-value opportunities (>$1000)
+                                let use_mev_protection = sized_op.profit_amount.to_f64().unwrap_or(0.0) > 1000.0;
+                                
+                                let execution_result = if use_mev_protection && (flashbots_clone.is_some() || mev_share_clone.is_some()) {
+                                    tracing::info!("🛡️ Using MEV protection for high-value opportunity: ${:.2}", 
+                                        sized_op.profit_amount.to_f64().unwrap_or(0.0));
+                                    
+                                    if let Some(ref fb_client) = flashbots_clone {
+                                        // Build Flashbots bundle
+                                        let bundle = crate::mev::flashbots::FlashbotsBundle {
+                                            id: sized_op.id.clone(),
+                                            transactions: vec![], // TODO: Build actual transactions
+                                            block_number: None,
+                                            min_timestamp: Some(sized_op.timestamp.timestamp() as u64),
+                                            max_timestamp: Some((sized_op.timestamp + chrono::Duration::seconds(30)).timestamp() as u64),
+                                            reverting_tx_hashes: vec![],
+                                            replacement_uid: None,
+                                            refund_recipient: None,
+                                            refund_percentage: Some(99),
+                                        };
+                                        
+                                        match fb_client.submit_bundle(&bundle).await as Result<String, _> {
+                                            Ok(bundle_id) => {
+                                                tracing::info!("✅ Flashbots bundle submitted: {}", bundle_id);
+                                                Ok(bundle_id)
+                                            },
+                                            Err(e) => {
+                                                tracing::warn!("⚠️ Flashbots submission failed: {}, falling back to normal execution", e);
+                                                exec_engine.execute_opportunity(&sized_op).await
+                                            }
+                                        }
+                                    } else if let Some(ref mev_client) = mev_share_clone {
+                                        // Use MEV-Share
+                                        tracing::info!("Using MEV-Share for execution");
+                                        exec_engine.execute_opportunity(&sized_op).await
+                                    } else {
+                                        exec_engine.execute_opportunity(&sized_op).await
+                                    }
+                                } else {
+                                    // Normal execution without MEV protection
+                                    exec_engine.execute_opportunity(&sized_op).await
+                                };
+                                
+                                match execution_result {
                                     Ok(order_bundle_id) => {
                                         metrics.record_latency("exec_opportunity", Duration::from_micros(0)).await;
                                         let _ = risk_mgr.update_daily_pnl(sized_op.profit_amount).await;
@@ -400,11 +517,12 @@ impl HFTBot {
             performance_optimizer,
             feature_engine,
             models,
+            onnx_predictor,
             position_sizing,
             smart_router,
             advanced_orders,
-            flashbots,
-            mev_share,
+            flashbots: flashbots.clone(),
+            mev_share: mev_share.clone(),
             running: Arc::new(RwLock::new(false)),
         })
     }

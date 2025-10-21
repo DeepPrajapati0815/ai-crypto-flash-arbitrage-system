@@ -6,7 +6,8 @@ use crate::core::types::ArbitrageOpportunity;
 use crate::market_data::orderbook::OrderBookManager;
 use anyhow::{Result, Context};
 use std::sync::Arc;
-use tracing::{info, warn, debug};
+use tokio::sync::RwLock;
+use tracing::{info, debug};
 
 /// ONNX-powered arbitrage predictor
 pub struct ONNXArbitragePredictor {
@@ -19,7 +20,7 @@ impl ONNXArbitragePredictor {
     /// Create new ONNX predictor
     pub async fn new(
         model_path: &str,
-        orderbook_manager: Arc<OrderBookManager>,
+        orderbook_manager: Arc<RwLock<OrderBookManager>>,
         confidence_threshold: f32,
     ) -> Result<Self> {
         info!("Initializing ONNX arbitrage predictor...");
@@ -57,10 +58,15 @@ impl ONNXArbitragePredictor {
         Ok(prediction >= self.confidence_threshold)
     }
     
-    /// Predict confidence score
+    /// Predict confidence score (alias for predict_opportunity)
     pub async fn predict_confidence(&self, opportunity: &ArbitrageOpportunity) -> Result<f32> {
         let features = self.feature_bridge.extract_features(opportunity).await?;
         self.model_manager.predict(&features).await
+    }
+    
+    /// Predict opportunity (alias for predict_confidence)
+    pub async fn predict_opportunity(&self, opportunity: &ArbitrageOpportunity) -> Result<f32> {
+        self.predict_confidence(opportunity).await
     }
     
     /// Predict for batch of opportunities
@@ -140,14 +146,15 @@ mod tests {
         
         let opportunity = ArbitrageOpportunity {
             id: "test".to_string(),
-            arb_type: ArbitrageType::CrossExchange,
+            opportunity_type: "CrossExchange".to_string(),
             pair: TradingPair::new("ETH".to_string(), "USDT".to_string()),
             buy_exchange: "binance".to_string(),
             sell_exchange: "okx".to_string(),
             buy_price: Decimal::new(2000, 0),
             sell_price: Decimal::new(2020, 0),
-            quantity: Decimal::new(1, 0),
-            expected_profit: Decimal::new(20, 0),
+            max_quantity: Decimal::new(1, 0),
+            profit_amount: Decimal::new(20, 0),
+            profit_percentage: Decimal::new(1, 2), // 0.01 = 1%
             confidence: 0.85,
             timestamp: chrono::Utc::now(),
         };
@@ -173,27 +180,29 @@ mod tests {
         let opportunities = vec![
             ArbitrageOpportunity {
                 id: "test1".to_string(),
-                arb_type: ArbitrageType::CrossExchange,
+                opportunity_type: "CrossExchange".to_string(),
                 pair: TradingPair::new("ETH".to_string(), "USDT".to_string()),
                 buy_exchange: "binance".to_string(),
                 sell_exchange: "okx".to_string(),
                 buy_price: Decimal::new(2000, 0),
                 sell_price: Decimal::new(2020, 0),
-                quantity: Decimal::new(1, 0),
-                expected_profit: Decimal::new(20, 0),
+                max_quantity: Decimal::new(1, 0),
+                profit_amount: Decimal::new(20, 0),
+                profit_percentage: Decimal::new(1, 2), // 1%
                 confidence: 0.85,
                 timestamp: chrono::Utc::now(),
             },
             ArbitrageOpportunity {
                 id: "test2".to_string(),
-                arb_type: ArbitrageType::CrossExchange,
+                opportunity_type: "CrossExchange".to_string(),
                 pair: TradingPair::new("BTC".to_string(), "USDT".to_string()),
                 buy_exchange: "okx".to_string(),
                 sell_exchange: "binance".to_string(),
                 buy_price: Decimal::new(40000, 0),
                 sell_price: Decimal::new(40100, 0),
-                quantity: Decimal::new(1, 1),
-                expected_profit: Decimal::new(10, 0),
+                max_quantity: Decimal::new(1, 1),
+                profit_amount: Decimal::new(10, 0),
+                profit_percentage: Decimal::new(25, 4), // 0.0025 = 0.25%
                 confidence: 0.75,
                 timestamp: chrono::Utc::now(),
             },

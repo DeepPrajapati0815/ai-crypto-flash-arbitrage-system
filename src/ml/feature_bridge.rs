@@ -4,26 +4,94 @@ use crate::core::types::{ArbitrageOpportunity, TradingPair};
 use crate::market_data::orderbook::OrderBookManager;
 use anyhow::Result;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
+use std::collections::HashMap;
+use tokio::sync::RwLock;
+use chrono::{DateTime, Utc, Timelike, Datelike};
+
+/// Cached feature computation result
+#[derive(Clone)]
+struct FeatureCache {
+    features: Vec<f32>,
+    computed_at: DateTime<Utc>,
+}
 
 /// Convert arbitrage opportunity to ONNX-compatible feature vector
 pub struct FeatureBridge {
-    orderbook_manager: Arc<OrderBookManager>,
+    orderbook_manager: Arc<RwLock<OrderBookManager>>,
+    /// Cache of recently computed features (keyed by opportunity ID)
+    feature_cache: Arc<RwLock<HashMap<String, FeatureCache>>>,
+    /// Maximum cache size (prevent memory bloat)
+    max_cache_size: usize,
+    /// Cache TTL in seconds
+    cache_ttl_seconds: i64,
 }
 
 impl FeatureBridge {
-    pub fn new(orderbook_manager: Arc<OrderBookManager>) -> Self {
-        Self { orderbook_manager }
+    pub fn new(orderbook_manager: Arc<RwLock<OrderBookManager>>) -> Self {
+        Self { 
+            orderbook_manager,
+            feature_cache: Arc::new(RwLock::new(HashMap::new())),
+            max_cache_size: 1000,  // Cache up to 1000 computations
+            cache_ttl_seconds: 1,   // 1 second TTL (features change quickly in HFT)
+        }
     }
     
-    /// Extract 50 features from an arbitrage opportunity
+    /// Extract 50 features from an arbitrage opportunity (with caching)
     pub async fn extract_features(&self, opportunity: &ArbitrageOpportunity) -> Result<Vec<f32>> {
+        // Check cache first
+        {
+            let cache = self.feature_cache.read().await;
+            if let Some(cached) = cache.get(&opportunity.id) {
+                let age = (Utc::now() - cached.computed_at).num_seconds();
+                if age < self.cache_ttl_seconds {
+                    return Ok(cached.features.clone());
+                }
+            }
+        }
+        
+        // Compute features if not cached
+        let features = self.compute_features_optimized(opportunity).await?;
+        
+        // Update cache
+        {
+            let mut cache = self.feature_cache.write().await;
+            
+            // Evict oldest entries if cache is full
+            if cache.len() >= self.max_cache_size {
+                // Remove 20% of oldest entries
+                let to_remove = self.max_cache_size / 5;
+                let mut entries: Vec<_> = cache.iter()
+                    .map(|(k, v)| (k.clone(), v.computed_at))
+                    .collect();
+                entries.sort_by_key(|(_, t)| *t);
+                
+                for (key, _) in entries.iter().take(to_remove) {
+                    cache.remove(key);
+                }
+            }
+            
+            cache.insert(opportunity.id.clone(), FeatureCache {
+                features: features.clone(),
+                computed_at: Utc::now(),
+            });
+        }
+        
+        Ok(features)
+    }
+    
+    /// Compute features with optimized Decimal conversions
+    async fn compute_features_optimized(&self, opportunity: &ArbitrageOpportunity) -> Result<Vec<f32>> {
         let mut features = Vec::with_capacity(50);
         
+        // === Batch Convert Decimals to f32 (more efficient) ===
+        let buy_price = self.to_f32_fast(opportunity.buy_price);
+        let sell_price = self.to_f32_fast(opportunity.sell_price);
+        let quantity = self.to_f32_fast(opportunity.max_quantity);
+        
         // === Price Features (5) ===
-        let buy_price = self.to_f32(opportunity.buy_price);
-        let sell_price = self.to_f32(opportunity.sell_price);
-        let spread = ((sell_price - buy_price) / buy_price).max(0.0);
+        let spread = ((sell_price - buy_price) / buy_price.max(0.0001)).max(0.0);
         
         features.push(buy_price / 1000.0); // Normalize to 0-10 range
         features.push(sell_price / 1000.0);
@@ -37,7 +105,7 @@ impl FeatureBridge {
         features.push(0.0);
         
         // === Volume Features (5) ===
-        let buy_volume = self.to_f32(opportunity.quantity);
+        let buy_volume = quantity;
         let sell_volume = buy_volume; // Same for cross-exchange
         let volume_ratio = 1.0;
         let total_liquidity = buy_volume + sell_volume;
@@ -102,13 +170,13 @@ impl FeatureBridge {
         // === Time Features (5) ===
         let now = chrono::Utc::now();
         features.push(now.hour() as f32 / 24.0);
-        features.push(now.weekday().num_days_from_monday() as f32 / 7.0);
-        features.push(if now.weekday().num_days_from_monday() >= 5 { 1.0 } else { 0.0 });
+        features.push(now.weekday().number_from_monday() as f32 / 7.0);
+        features.push(if now.weekday().number_from_monday() >= 5 { 1.0 } else { 0.0 });
         features.push(0.0); // reserved
         features.push(0.0); // reserved
         
         // === Confidence & Profit (5 - derived features) ===
-        let expected_profit = self.to_f32(opportunity.expected_profit);
+        let expected_profit = self.to_f32(opportunity.profit_amount);
         features.push((opportunity.confidence as f32).min(1.0));
         features.push(expected_profit / buy_price); // Profit ratio
         features.push((expected_profit / 100.0).min(1.0)); // Normalized profit
@@ -131,11 +199,12 @@ impl FeatureBridge {
         exchange: &str,
     ) -> Result<(f64, f64)> {
         // Get best prices
+        let ob = self.orderbook_manager.read().await;
         if let Some((bid_price, bid_qty, ask_price, ask_qty)) =
-            self.orderbook_manager.get_best_prices_for_exchange(exchange, pair).await
+            ob.get_best_prices_for_exchange(exchange, pair).await
         {
-            let bid_ask_spread = ((ask_price - bid_price) / bid_price).to_f64().unwrap_or(0.0);
-            let depth_score = ((bid_qty + ask_qty) / Decimal::from(2)).to_f64().unwrap_or(1.0);
+            let bid_ask_spread = ((ask_price - bid_price) / bid_price).to_f32().unwrap_or(0.0) as f64;
+            let depth_score = ((bid_qty + ask_qty) / Decimal::from(2)).to_f32().unwrap_or(1.0) as f64;
             
             Ok((bid_ask_spread, depth_score))
         } else {
@@ -146,6 +215,29 @@ impl FeatureBridge {
     /// Convert Decimal to f32
     fn to_f32(&self, value: Decimal) -> f32 {
         value.to_string().parse::<f32>().unwrap_or(0.0)
+    }
+    
+    /// Helper: Fast Decimal to f32 conversion
+    #[inline(always)]
+    fn to_f32_fast(&self, value: Decimal) -> f32 {
+        // Direct to_f32 is usually fast enough, but we inline it for optimization
+        value.to_f32().unwrap_or(0.0)
+    }
+    
+    /// Clear expired cache entries (call periodically)
+    pub async fn cleanup_cache(&self) {
+        let mut cache = self.feature_cache.write().await;
+        let now = Utc::now();
+        
+        cache.retain(|_, v| {
+            (now - v.computed_at).num_seconds() < self.cache_ttl_seconds
+        });
+    }
+    
+    /// Get cache statistics
+    pub async fn get_cache_stats(&self) -> (usize, usize) {
+        let cache = self.feature_cache.read().await;
+        (cache.len(), self.max_cache_size)
     }
 }
 

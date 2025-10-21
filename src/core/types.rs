@@ -105,6 +105,57 @@ pub struct ArbitrageOpportunity {
     pub opportunity_type: String,
 }
 
+impl ArbitrageOpportunity {
+    /// Get quantity (alias for max_quantity for backwards compatibility)
+    pub fn quantity(&self) -> Decimal {
+        self.max_quantity
+    }
+    
+    /// Get expected profit (alias for profit_amount for backwards compatibility)
+    pub fn expected_profit(&self) -> Decimal {
+        self.profit_amount
+    }
+    
+    /// Get arbitrage type (alias for opportunity_type for backwards compatibility)
+    pub fn arb_type(&self) -> &str {
+        &self.opportunity_type
+    }
+    
+    /// Create a new cross-exchange arbitrage opportunity
+    pub fn cross_exchange(
+        id: String,
+        pair: TradingPair,
+        buy_exchange: String,
+        sell_exchange: String,
+        buy_price: Decimal,
+        sell_price: Decimal,
+        max_quantity: Decimal,
+        confidence: f64,
+    ) -> Self {
+        let profit_amount = (sell_price - buy_price) * max_quantity;
+        let profit_percentage = if buy_price > Decimal::ZERO {
+            (sell_price - buy_price) / buy_price
+        } else {
+            Decimal::ZERO
+        };
+        
+        Self {
+            id,
+            pair,
+            buy_exchange,
+            sell_exchange,
+            buy_price,
+            sell_price,
+            profit_percentage,
+            profit_amount,
+            max_quantity,
+            timestamp: Utc::now(),
+            confidence,
+            opportunity_type: "CrossExchange".to_string(),
+        }
+    }
+}
+
 /// Order types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderType {
