@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  hft-bot:
+    build: .
+    container_name: hft-arbitrage-bot
+    environment:
+      - RUST_LOG=info
+      - DATABASE_URL=postgresql://hftbot:password@postgres:5432/hft_bot
+      - REDIS_URL=redis://redis:6379
+      - METRICS_PORT=8080
+      - LOG_LEVEL=info
+      - ENABLE_TRACING=true
+      - MAX_CONCURRENT_ORDERS=100
+      - LATENCY_TARGET_US=1000
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - hft-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: hft-postgres
+    environment:
+      - POSTGRES_DB=hft_bot
+      - POSTGRES_USER=hftbot
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - hft-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: hft-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - hft-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hft-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - hft-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hft-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - hft-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  grafana_data:
+  prometheus_data:
+
+networks:
+  hft-network:
+    driver: bridge

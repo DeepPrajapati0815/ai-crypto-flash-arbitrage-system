@@ -1,0 +1,322 @@
+# Flash Arbitrage System - Git Ignore File
+
+# ============================================
+# Rust / Cargo
+# ============================================
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Rust compilation artifacts
+debug/
+release/
+*.rlib
+*.rmeta
+*.exe
+*.dll
+*.so
+*.dylib
+
+# ============================================
+# Python / ML Training
+# ============================================
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+ml_training/venv/
+ml_training/env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Jupyter Notebook
+.ipynb_checkpoints
+ml_training/notebooks/.ipynb_checkpoints/
+
+# IPython
+profile_default/
+ipython_config.py
+
+# ============================================
+# ML Models & Training Data
+# ============================================
+# Trained models (large binary files)
+*.onnx
+*.pt
+*.pth
+*.h5
+*.pkl
+*.pickle
+*.joblib
+*.model
+
+# Model directories
+models/
+ml_training/models/
+!ml_training/models/.gitkeep
+
+# Training data
+*.csv
+*.parquet
+*.feather
+ml_training/data/
+!ml_training/data/.gitkeep
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# ============================================
+# Environment & Secrets
+# ============================================
+.env
+.env.*
+!.env.example
+.env.local
+.env.testnet
+.env.mainnet
+
+# API Keys & Secrets
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+postgres_data/
+redis_data/
+
+# Database dumps
+*.sql
+*.dump
+!migrations/*.sql
+
+# ============================================
+# Logs
+# ============================================
+*.log
+logs/
+*.log.*
+log/
+
+# ============================================
+# Docker
+# ============================================
+# Docker volumes & data
+docker-data/
+docker-volumes/
+
+# Docker compose overrides
+docker-compose.override.yml
+
+# ============================================
+# IDE & Editors
+# ============================================
+# VSCode
+.vscode/
+!.vscode/settings.json.example
+!.vscode/launch.json.example
+*.code-workspace
+
+# Cursor
+.cursor/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# JetBrains
+.idea/
+*.swp
+*.swo
+*~
+
+# Vim
+*.swp
+*.swo
+*.swn
+.*.sw?
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================
+# Operating System
+# ============================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ============================================
+# Temporary Files
+# ============================================
+*.tmp
+*.temp
+*.bak
+*.backup
+*.cache
+tmp/
+temp/
+
+# ============================================
+# Build & Compilation
+# ============================================
+# Rust incremental compilation
+target/debug/incremental/
+target/release/incremental/
+
+# Benchmark results
+benchmarks/results/
+*.bench
+
+# Test coverage
+*.profraw
+*.profdata
+coverage/
+lcov.info
+
+# ============================================
+# Monitoring & Metrics
+# ============================================
+# Grafana data
+monitoring/grafana/data/
+
+# Prometheus data
+monitoring/prometheus/data/
+
+# ============================================
+# Documentation Build
+# ============================================
+# Rust docs
+target/doc/
+docs/_build/
+
+# ============================================
+# Node.js (if using for tooling)
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# ============================================
+# Blockchain / Web3
+# ============================================
+# Hardhat / Foundry artifacts
+artifacts/
+cache/
+out/
+broadcast/
+
+# Contract ABIs (keep source, ignore compiled)
+*.abi.json
+
+# ============================================
+# Testing
+# ============================================
+# Test outputs
+test-results/
+test-artifacts/
+.pytest_cache/
+
+# ============================================
+# CI/CD
+# ============================================
+.github/workflows/secrets.yml
+
+# ============================================
+# Miscellaneous
+# ============================================
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Certificates
+*.crt
+*.cer
+
+# System files
+.fuse_hidden*
+.nfs*
+
+# ============================================
+# Project-Specific
+# ============================================
+# Backup files
+BACKUP_*
+*.backup
+
+# Old versions
+OLD_*
+*.old
+
+# Notes & drafts
+NOTES.md
+TODO_PERSONAL.md
+DRAFT_*.md
+
+# Performance profiling
+flamegraph.svg
+perf.data

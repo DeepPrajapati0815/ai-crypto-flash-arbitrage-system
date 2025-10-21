@@ -1,0 +1,259 @@
+# Flash Arbitrage System - Docker Ignore File
+# Files and directories to exclude from Docker build context
+
+# ============================================
+# Git & Version Control
+# ============================================
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# ============================================
+# Documentation
+# ============================================
+*.md
+!README.md
+docs/
+CHANGELOG.md
+CONTRIBUTING.md
+LICENSE.md
+
+# Implementation docs (not needed in container)
+IMPLEMENTATION_*.md
+DEPLOYMENT_GUIDE.md
+TESTNET_DEPLOYMENT_GUIDE.md
+ONNX_IMPLEMENTATION_COMPLETE.md
+PROJECT_STATUS.md
+FINAL_STATUS.md
+
+# ============================================
+# Rust Build Artifacts
+# ============================================
+target/
+Cargo.lock
+
+# Don't need incremental compilation in Docker
+target/debug/incremental/
+target/release/incremental/
+
+# Test artifacts
+target/debug/deps/
+target/release/deps/
+
+# ============================================
+# Python / ML Training
+# ============================================
+# Virtual environments (rebuild in container)
+venv/
+env/
+.venv/
+ml_training/venv/
+ml_training/env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Jupyter notebooks (not needed for production)
+ml_training/notebooks/
+*.ipynb
+
+# ============================================
+# ML Models & Data
+# ============================================
+# Training data (mount as volume instead)
+ml_training/data/
+*.csv
+*.parquet
+
+# Trained models (mount or copy separately)
+ml_training/models/
+*.onnx
+*.pt
+*.pth
+*.h5
+*.pkl
+
+# ============================================
+# Environment Files
+# ============================================
+.env
+.env.*
+!.env.example
+
+# Secrets
+secrets/
+*.key
+*.pem
+
+# ============================================
+# Development Files
+# ============================================
+# IDE configurations
+.vscode/
+.cursor/
+.idea/
+*.iml
+*.sublime-*
+
+# Editor files
+*.swp
+*.swo
+*~
+.*.sw?
+
+# ============================================
+# Testing
+# ============================================
+# Test files
+tests/
+test_*.rs
+*_test.rs
+*.test.rs
+
+# Test data
+test-data/
+test_results/
+
+# Benchmark files
+benchmarks/
+*.bench
+
+# ============================================
+# CI/CD
+# ============================================
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+
+# ============================================
+# Scripts (Development Only)
+# ============================================
+# Setup scripts
+setup_env.bat
+setup_env.ps1
+run.bat
+run.ps1
+
+# Test scripts
+scripts/run_integration_tests.ps1
+scripts/load_test.ps1
+scripts/testnet_deploy.ps1
+
+# ============================================
+# Logs & Temporary Files
+# ============================================
+*.log
+*.log.*
+logs/
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# ============================================
+# Database
+# ============================================
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+postgres_data/
+redis_data/
+
+# Database dumps
+*.sql
+!migrations/*.sql
+
+# ============================================
+# Docker
+# ============================================
+# Docker files (already in context)
+.dockerignore
+Dockerfile.dev
+docker-compose.dev.yml
+docker-compose.test.yml
+
+# Docker data
+docker-data/
+docker-volumes/
+
+# ============================================
+# Monitoring (Development)
+# ============================================
+# Grafana development data
+monitoring/grafana/data/
+
+# Prometheus development data
+monitoring/prometheus/data/
+
+# ============================================
+# OS-Specific
+# ============================================
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+.Trash-*
+
+# ============================================
+# Build Artifacts
+# ============================================
+# Compiled binaries (rebuild in container)
+*.exe
+*.dll
+*.so
+*.dylib
+*.pdb
+
+# ============================================
+# Miscellaneous
+# ============================================
+# Archives
+*.zip
+*.tar.gz
+*.rar
+
+# Backup files
+BACKUP_*
+*.backup
+OLD_*
+
+# Personal notes
+NOTES.md
+TODO_PERSONAL.md
+DRAFT_*.md
+
+# Coverage reports
+coverage/
+*.profraw
+*.profdata
+
+# ============================================
+# Keep These (Override excludes above)
+# ============================================
+# Keep essential config files
+!Cargo.toml
+!rust-toolchain
+!rust-toolchain.toml
+
+# Keep essential scripts
+!scripts/start.sh
+!scripts/healthcheck.sh
+
+# Keep migrations
+!migrations/*.sql
+
+# Keep static assets if any
+!static/
+
+# Keep contract ABIs if needed
+!contracts/*.json
+

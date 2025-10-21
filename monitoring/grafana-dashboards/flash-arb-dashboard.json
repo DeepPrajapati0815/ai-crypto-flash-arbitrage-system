@@ -1,0 +1,203 @@
+{
+  "dashboard": {
+    "title": "Flash Arbitrage Bot Dashboard",
+    "tags": ["flash-arb", "defi", "trading"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Total Profit (USD)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "flasharb_profit_total_usd",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Profit Per Trade (USD)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "flasharb_profit_per_trade_usd",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Total Trades",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(flasharb_trades_total)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 0
+        }
+      },
+      {
+        "id": 4,
+        "title": "Successful vs Failed Trades",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "flasharb_trades_total",
+            "refId": "A",
+            "legendFormat": "{{status}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 5,
+        "title": "Gas Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "flasharb_gas_used",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        }
+      },
+      {
+        "id": 6,
+        "title": "Gas Price (Gwei)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "flasharb_gas_price_gwei",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        }
+      },
+      {
+        "id": 7,
+        "title": "Opportunities Found",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(flasharb_opportunities_found_total[5m])",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 16
+        }
+      },
+      {
+        "id": 8,
+        "title": "Circuit Breaker Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "flasharb_circuit_breaker_active",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 0,
+          "y": 24
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "options": {
+                  "0": {
+                    "text": "Inactive",
+                    "color": "green"
+                  },
+                  "1": {
+                    "text": "Active",
+                    "color": "red"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Bot Uptime",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "flasharb_bot_uptime_seconds",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 6,
+          "y": 24
+        }
+      },
+      {
+        "id": 10,
+        "title": "Current Block Number",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "flasharb_block_number",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 24
+        }
+      }
+    ],
+    "refresh": "5s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}
+
