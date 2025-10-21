@@ -3,9 +3,6 @@
 use serde::{Deserialize, Serialize};
 pub use rust_decimal::Decimal;
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
-use std::str::FromStr;
-use rust_decimal::prelude::FromPrimitive;
 
 /// Trading pair identifier
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -41,6 +38,15 @@ pub struct PriceLevel {
     pub timestamp: u64,
 }
 
+/// Feature sample for ML processing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureSample {
+    pub sample_id: String,
+    pub features: Vec<f32>,
+    pub timestamp: DateTime<Utc>,
+    pub pair: TradingPair,
+}
+
 /// Order book snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderBook {
@@ -49,6 +55,35 @@ pub struct OrderBook {
     pub asks: Vec<PriceLevel>,
     pub timestamp: DateTime<Utc>,
     pub sequence: u64,
+}
+
+impl OrderBook {
+    /// Get best bid price
+    pub fn best_bid(&self) -> Decimal {
+        self.bids.first().map(|level| level.price).unwrap_or_default()
+    }
+
+    /// Get best ask price
+    pub fn best_ask(&self) -> Decimal {
+        self.asks.first().map(|level| level.price).unwrap_or_default()
+    }
+
+    /// Get total volume (bids + asks)
+    pub fn total_volume(&self) -> Decimal {
+        let bid_volume: Decimal = self.bids.iter().map(|level| level.quantity).sum();
+        let ask_volume: Decimal = self.asks.iter().map(|level| level.quantity).sum();
+        bid_volume + ask_volume
+    }
+
+    /// Get bid depth
+    pub fn bid_depth(&self) -> Decimal {
+        self.bids.iter().map(|level| level.quantity).sum()
+    }
+
+    /// Get ask depth
+    pub fn ask_depth(&self) -> Decimal {
+        self.asks.iter().map(|level| level.quantity).sum()
+    }
 }
 
 /// Market data update

@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::str::FromStr;
 use tokio::sync::RwLock;
-use tracing::{info, debug, error, warn};
+use tracing::{info, warn};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
 use chrono::{DateTime, Utc, Duration};
 use uuid::Uuid;
-use crate::core::types::{TradingPair, OrderSide};
+use crate::core::types::TradingPair;
 
 /// Advanced risk management system
 pub struct AdvancedRiskManager {

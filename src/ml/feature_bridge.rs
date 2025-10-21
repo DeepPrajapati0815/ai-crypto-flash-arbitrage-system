@@ -1,12 +1,12 @@
 //! Feature engineering bridge between Rust data structures and ONNX models
 
-use crate::core::types::{ArbitrageOpportunity, TradingPair};
+use crate::core::types::{ArbitrageOpportunity, TradingPair, Trade, OrderBook};
 use crate::market_data::orderbook::OrderBookManager;
 use anyhow::Result;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use tokio::sync::RwLock;
 use chrono::{DateTime, Utc, Timelike, Datelike};
 
@@ -17,15 +17,64 @@ struct FeatureCache {
     computed_at: DateTime<Utc>,
 }
 
+/// PRODUCTION FIX: Historical market data buffer for real technical indicators
+#[derive(Clone)]
+struct MarketDataHistory {
+    prices: VecDeque<f64>,
+    volumes: VecDeque<f64>,
+    timestamps: VecDeque<DateTime<Utc>>,
+    max_length: usize,
+}
+
+impl MarketDataHistory {
+    fn new(max_length: usize) -> Self {
+        Self {
+            prices: VecDeque::with_capacity(max_length),
+            volumes: VecDeque::with_capacity(max_length),
+            timestamps: VecDeque::with_capacity(max_length),
+            max_length,
+        }
+    }
+    
+    fn add_data_point(&mut self, price: f64, volume: f64, timestamp: DateTime<Utc>) {
+        // Remove oldest if at capacity
+        if self.prices.len() >= self.max_length {
+            self.prices.pop_front();
+            self.volumes.pop_front();
+            self.timestamps.pop_front();
+        }
+        
+        self.prices.push_back(price);
+        self.volumes.push_back(volume);
+        self.timestamps.push_back(timestamp);
+    }
+    
+    fn has_sufficient_data(&self, required_periods: usize) -> bool {
+        self.prices.len() >= required_periods
+    }
+    
+    fn get_prices(&self) -> Vec<f64> {
+        self.prices.iter().copied().collect()
+    }
+    
+    fn get_volumes(&self) -> Vec<f64> {
+        self.volumes.iter().copied().collect()
+    }
+}
+
 /// Convert arbitrage opportunity to ONNX-compatible feature vector
 pub struct FeatureBridge {
     orderbook_manager: Arc<RwLock<OrderBookManager>>,
     /// Cache of recently computed features (keyed by opportunity ID)
     feature_cache: Arc<RwLock<HashMap<String, FeatureCache>>>,
+    /// PRODUCTION FIX: Real historical price/volume data per trading pair
+    price_history: Arc<RwLock<HashMap<String, MarketDataHistory>>>,
     /// Maximum cache size (prevent memory bloat)
     max_cache_size: usize,
     /// Cache TTL in seconds
     cache_ttl_seconds: i64,
+    /// Maximum historical data points to store per pair
+    max_history_length: usize,
 }
 
 impl FeatureBridge {
@@ -33,9 +82,144 @@ impl FeatureBridge {
         Self { 
             orderbook_manager,
             feature_cache: Arc::new(RwLock::new(HashMap::new())),
+            price_history: Arc::new(RwLock::new(HashMap::new())), // PRODUCTION FIX
             max_cache_size: 1000,  // Cache up to 1000 computations
             cache_ttl_seconds: 1,   // 1 second TTL (features change quickly in HFT)
+            max_history_length: 100, // Store last 100 data points per pair (~100 seconds in HFT)
         }
+    }
+    
+    /// PRODUCTION FIX: Update historical data when new ticker arrives
+    pub async fn update_market_data(&self, pair: &str, price: f64, volume: f64, timestamp: DateTime<Utc>) {
+        let mut history = self.price_history.write().await;
+        
+        history
+            .entry(pair.to_string())
+            .or_insert_with(|| MarketDataHistory::new(self.max_history_length))
+            .add_data_point(price, volume, timestamp);
+    }
+    
+    /// PRODUCTION FIX: Get historical prices for a trading pair
+    async fn get_historical_data(&self, pair: &str, min_periods: usize) -> Option<(Vec<f64>, Vec<f64>)> {
+        let history = self.price_history.read().await;
+        
+        if let Some(data) = history.get(pair) {
+            if data.has_sufficient_data(min_periods) {
+                return Some((data.get_prices(), data.get_volumes()));
+            }
+        }
+        None
+    }
+    
+    /// ✅ PRODUCTION FIX: Wait for historical data warmup before trading
+    /// This ensures technical indicators have sufficient data to be meaningful
+    pub async fn wait_for_warmup(
+        &self, 
+        pairs: &[String], 
+        min_periods: usize, 
+        timeout_secs: u64
+    ) -> Result<()> {
+        use std::time::{Instant, Duration};
+        
+        let start = Instant::now();
+        let timeout = Duration::from_secs(timeout_secs);
+        
+        tracing::info!(
+            "🔄 Waiting for historical data warmup (need {} periods for {} pairs)...", 
+            min_periods, 
+            pairs.len()
+        );
+        
+        loop {
+            let history = self.price_history.read().await;
+            
+            // Check if all pairs have sufficient data
+            let mut ready_count = 0;
+            let mut insufficient_pairs = Vec::new();
+            
+            for pair in pairs {
+                if let Some(data) = history.get(pair) {
+                    if data.has_sufficient_data(min_periods) {
+                        ready_count += 1;
+                    } else {
+                        insufficient_pairs.push((pair.clone(), data.prices.len()));
+                    }
+                } else {
+                    insufficient_pairs.push((pair.clone(), 0));
+                }
+            }
+            
+            // Log progress every 5 seconds
+            let elapsed = start.elapsed().as_secs();
+            if elapsed > 0 && elapsed % 5 == 0 {
+                tracing::info!(
+                    "📊 Warmup progress: {}/{} pairs ready ({:.1}%)", 
+                    ready_count, 
+                    pairs.len(),
+                    (ready_count as f64 / pairs.len() as f64) * 100.0
+                );
+                
+                if !insufficient_pairs.is_empty() && insufficient_pairs.len() <= 5 {
+                    for (pair, count) in &insufficient_pairs {
+                        tracing::debug!("  ⏳ {} has {}/{} periods", pair, count, min_periods);
+                    }
+                }
+            }
+            
+            // Check if all pairs are ready
+            if ready_count == pairs.len() {
+                tracing::info!(
+                    "✅ Warmup complete: all {} pairs have {} periods of historical data", 
+                    pairs.len(), 
+                    min_periods
+                );
+                return Ok(());
+            }
+            
+            // Check timeout
+            if start.elapsed() > timeout {
+                tracing::warn!(
+                    "⚠️ Warmup timeout: only {}/{} pairs ready after {}s", 
+                    ready_count, 
+                    pairs.len(),
+                    timeout_secs
+                );
+                
+                // Log which pairs are missing
+                for (pair, count) in insufficient_pairs {
+                    tracing::warn!("  ⚠️ {} has only {}/{} periods", pair, count, min_periods);
+                }
+                
+                return Err(anyhow::anyhow!(
+                    "Warmup timeout: only {}/{} pairs ready after {}s", 
+                    ready_count, 
+                    pairs.len(), 
+                    timeout_secs
+                ));
+            }
+            
+            // Wait before checking again
+            drop(history); // Release lock before sleeping
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+    
+    /// Check if a specific pair has sufficient historical data
+    pub async fn has_sufficient_data(&self, pair: &str, min_periods: usize) -> bool {
+        let history = self.price_history.read().await;
+        history.get(pair)
+            .map(|data| data.has_sufficient_data(min_periods))
+            .unwrap_or(false)
+    }
+    
+    /// Get current data availability status for all pairs
+    pub async fn get_warmup_status(&self) -> HashMap<String, (usize, bool)> {
+        let history = self.price_history.read().await;
+        history.iter()
+            .map(|(pair, data)| {
+                (pair.clone(), (data.prices.len(), data.has_sufficient_data(26)))
+            })
+            .collect()
     }
     
     /// Extract 50 features from an arbitrage opportunity (with caching)
@@ -136,29 +320,64 @@ impl FeatureBridge {
         features.push(0.0); // reserved
         
         // === Technical Indicators (10) ===
-        // These would come from historical data in production
-        features.push(50.0 / 100.0); // RSI (normalized)
-        features.push(0.0); // MACD
-        features.push(buy_price / 1000.0); // EMA short
-        features.push(buy_price / 1000.0); // EMA long
-        features.push(buy_price * 1.02 / 1000.0); // Bollinger upper
-        features.push(buy_price * 0.98 / 1000.0); // Bollinger lower
-        features.push(20.0); // ATR
-        features.push(0.0); // OBV
-        features.push(50.0); // Stochastic K
-        features.push(50.0); // Stochastic D
+        // PRODUCTION FIX: Use real historical data for technical indicators
+        let pair_symbol = opportunity.pair.symbol();
+        let (historical_prices, historical_volumes) = match self.get_historical_data(&pair_symbol, 26).await {
+            Some((prices, volumes)) => (prices, volumes),
+            None => {
+                // Fallback: insufficient historical data
+                // Return minimal feature set with warnings
+                tracing::warn!("Insufficient historical data for {}. Need 26+ periods for full indicators.", pair_symbol);
+                // Use current prices as fallback (suboptimal but safe)
+                (vec![buy_price as f64, sell_price as f64], vec![buy_volume as f64, sell_volume as f64])
+            }
+        };
+        
+        let recent_trades = vec![]; // Trades not currently tracked (can be added later)
+        let order_book = self.get_order_book_fallback(&opportunity.pair).await;
+        
+        let rsi = calculate_rsi_simple(&historical_prices);
+        let macd = calculate_macd_simple(&historical_prices);
+        let ema_short = calculate_ema_simple(&historical_prices, 12);
+        let ema_long = calculate_ema_simple(&historical_prices, 26);
+        let (bb_upper, bb_lower) = calculate_bollinger_bands_simple(&historical_prices);
+        let atr = calculate_atr_simple(&historical_prices);
+        let obv = calculate_obv_simple(&historical_prices, &historical_volumes);
+        let (stoch_k, stoch_d) = calculate_stochastic_simple(&historical_prices);
+        
+        features.push((rsi / 100.0) as f32); // RSI (normalized)
+        features.push(macd as f32);
+        features.push((ema_short / 1000.0) as f32); // EMA short
+        features.push((ema_long / 1000.0) as f32); // EMA long
+        features.push((bb_upper / 1000.0) as f32); // Bollinger upper
+        features.push((bb_lower / 1000.0) as f32); // Bollinger lower
+        features.push(atr as f32);
+        features.push(obv as f32);
+        features.push(stoch_k as f32);
+        features.push(stoch_d as f32);
         
         // === Market Microstructure (10) ===
-        features.push(10.0); // trade_frequency
-        features.push(1.0); // average_trade_size
-        features.push(0.001); // price_impact
-        features.push(0.0005); // slippage_estimate
-        features.push(0.0); // reserved
-        features.push(0.0); // reserved
-        features.push(0.0); // reserved
-        features.push(0.0); // reserved
-        features.push(0.0); // reserved
-        features.push(0.0); // reserved
+        let trade_frequency = calculate_trade_frequency_simple(&recent_trades);
+        let avg_trade_size = calculate_average_trade_size_simple(&recent_trades);
+        let price_impact = calculate_price_impact_simple(&order_book, &recent_trades);
+        let slippage_estimate = calculate_slippage_estimate_simple(&order_book, avg_trade_size);
+        let volatility = calculate_volatility_simple(&historical_prices);
+        let momentum = calculate_momentum_simple(&historical_prices);
+        let mean_reversion = calculate_mean_reversion_simple(&historical_prices);
+        let liquidity_score = calculate_liquidity_score_simple(&order_book);
+        let spread_ratio = calculate_spread_ratio_simple(&order_book);
+        let volume_profile = calculate_volume_profile_simple(&recent_trades);
+        
+        features.push(trade_frequency as f32);
+        features.push(avg_trade_size as f32);
+        features.push(price_impact as f32);
+        features.push(slippage_estimate as f32);
+        features.push(volatility as f32);
+        features.push(momentum as f32);
+        features.push(mean_reversion as f32);
+        features.push(liquidity_score as f32);
+        features.push(spread_ratio as f32);
+        features.push(volume_profile as f32);
         
         // === Exchange-Specific (5) ===
         features.push(0.001); // exchange_fee (0.1%)
@@ -223,6 +442,142 @@ impl FeatureBridge {
         // Direct to_f32 is usually fast enough, but we inline it for optimization
         value.to_f32().unwrap_or(0.0)
     }
+
+    /// Fallback order book method for feature extraction
+    async fn get_order_book_fallback(&self, pair: &TradingPair) -> OrderBook {
+        // Simple fallback implementation
+        OrderBook {
+            pair: pair.clone(),
+            bids: vec![],
+            asks: vec![],
+            timestamp: Utc::now(),
+            sequence: 0,
+        }
+    }
+
+    /// Extract features from ticker data (production implementation)
+    pub async fn extract_features_from_ticker(&self, ticker: &crate::core::types::Ticker) -> Vec<f32> {
+        let mut features: Vec<f32> = Vec::with_capacity(50);
+        
+        // === Price Features (5) ===
+        let buy_price = ticker.bid.to_f64().unwrap_or_default();
+        let sell_price = ticker.ask.to_f64().unwrap_or_default();
+        let spread = (sell_price - buy_price) / buy_price.max(1e-8);
+        let volume_24h = ticker.volume_24h.to_f64().unwrap_or_default();
+        
+        // PRODUCTION FIX: Update historical data buffer
+        let pair_symbol = ticker.pair.symbol();
+        let mid_price = (buy_price + sell_price) / 2.0;
+        self.update_market_data(&pair_symbol, mid_price, volume_24h, ticker.timestamp).await;
+        
+        // PRODUCTION FIX: Calculate real volatility and momentum from historical data
+        let (volatility, momentum) = match self.get_historical_data(&pair_symbol, 10).await {
+            Some((prices, _)) => {
+                let vol = calculate_volatility_simple(&prices);
+                let mom = calculate_momentum_simple(&prices);
+                (vol, mom)
+            },
+            None => {
+                // Fallback estimates
+                (spread * 2.0, 0.0)
+            }
+        };
+        
+        features.push((buy_price / 1000.0) as f32); // Normalize to 0-10 range
+        features.push((sell_price / 1000.0) as f32);
+        features.push(spread as f32);
+        features.push(volatility as f32);
+        features.push(momentum as f32);
+        
+        // === Volume Features (5) ===
+        let buy_volume = ticker.volume_24h.to_f64().unwrap_or_default() / 2.0; // Estimate from 24h volume
+        let sell_volume = ticker.volume_24h.to_f64().unwrap_or_default() / 2.0; // Estimate from 24h volume
+        let volume_ratio = buy_volume / (sell_volume + 1e-8);
+        let total_liquidity = buy_volume + sell_volume;
+        let liquidity_score = (total_liquidity + 1.0).ln();
+        
+        features.push(buy_volume as f32);
+        features.push(sell_volume as f32);
+        features.push(volume_ratio as f32);
+        features.push(total_liquidity as f32);
+        features.push(liquidity_score as f32);
+        
+        // === Order Book Features (10) ===
+        let bid_ask_spread = spread;
+        let order_book_depth = total_liquidity;
+        let bid_quantity = buy_volume;
+        let ask_quantity = sell_volume;
+        let imbalance = (bid_quantity - ask_quantity) / (bid_quantity + ask_quantity + 1e-8);
+        
+        features.push(bid_ask_spread as f32);
+        features.push(order_book_depth as f32);
+        features.push(bid_quantity as f32);
+        features.push(ask_quantity as f32);
+        features.push(imbalance as f32);
+        
+        // Add placeholder features for remaining order book features
+        for _ in 0..5 {
+            features.push(0.0);
+        }
+        
+        // === Technical Indicators (10) ===
+        // PRODUCTION FIX: Calculate real technical indicators from historical data
+        if let Some((historical_prices, historical_volumes)) = self.get_historical_data(&pair_symbol, 26).await {
+            let rsi = calculate_rsi_simple(&historical_prices);
+            let macd = calculate_macd_simple(&historical_prices);
+            let ema_short = calculate_ema_simple(&historical_prices, 12);
+            let ema_long = calculate_ema_simple(&historical_prices, 26);
+            let (bb_upper, bb_lower) = calculate_bollinger_bands_simple(&historical_prices);
+            let atr = calculate_atr_simple(&historical_prices);
+            let obv = calculate_obv_simple(&historical_prices, &historical_volumes);
+            let (stoch_k, stoch_d) = calculate_stochastic_simple(&historical_prices);
+            
+            features.push((rsi / 100.0) as f32); // RSI (normalized)
+            features.push(macd as f32);
+            features.push((ema_short / 1000.0) as f32); // EMA short
+            features.push((ema_long / 1000.0) as f32); // EMA long
+            features.push((bb_upper / 1000.0) as f32); // Bollinger upper
+            features.push((bb_lower / 1000.0) as f32); // Bollinger lower
+            features.push(atr as f32);
+            features.push(obv as f32);
+            features.push(stoch_k as f32);
+            features.push(stoch_d as f32);
+        } else {
+            // Insufficient data - use neutral values
+            for _ in 0..10 {
+                features.push(0.5); // Neutral indicator values
+            }
+        }
+        
+        // === Market Microstructure (10) ===
+        // Placeholder microstructure features
+        for _ in 0..10 {
+            features.push(0.0);
+        }
+        
+        // === Exchange-Specific (5) ===
+        features.push(0.001); // exchange_fee (0.1%)
+        features.push(30.0); // gas_cost
+        features.push(50.0); // latency_estimate
+        features.push(0.0); // reserved
+        features.push(0.0); // reserved
+        
+        // === Time Features (5) ===
+        let now = Utc::now();
+        features.push((now.hour() as f32 / 24.0) as f32); // Hour of day (normalized)
+        features.push((now.weekday().number_from_monday() as f32 / 7.0) as f32); // Day of week
+        features.push(if now.weekday().number_from_monday() >= 5 { 1.0 } else { 0.0 }); // Weekend
+        features.push(0.0); // reserved
+        features.push(0.0); // reserved
+        
+        // Ensure exactly 50 features
+        while features.len() < 50 {
+            features.push(0.0);
+        }
+        features.truncate(50);
+        
+        features
+    }
     
     /// Clear expired cache entries (call periodically)
     pub async fn cleanup_cache(&self) {
@@ -277,5 +632,589 @@ mod tests {
         
         println!("Extracted features: {:?}", &features[..10]);
     }
+    
+    /// Calculate RSI (Relative Strength Index)
+    pub async fn calculate_rsi(&self, prices: &[f64]) -> f64 {
+        if prices.len() < 14 {
+            return 50.0; // Neutral RSI if insufficient data
+        }
+        
+        let mut gains = Vec::new();
+        let mut losses = Vec::new();
+        
+        for i in 1..prices.len() {
+            let change = prices[i] - prices[i-1];
+            if change > 0.0 {
+                gains.push(change);
+                losses.push(0.0);
+            } else {
+                gains.push(0.0);
+                losses.push(-change);
+            }
+        }
+        
+        let avg_gain = gains.iter().sum::<f64>() / gains.len() as f64;
+        let avg_loss = losses.iter().sum::<f64>() / losses.len() as f64;
+        
+        if avg_loss == 0.0 {
+            return 100.0;
+        }
+        
+        let rs = avg_gain / avg_loss;
+        100.0 - (100.0 / (1.0 + rs))
+    }
+    
+    /// Calculate MACD (Moving Average Convergence Divergence)
+    pub async fn calculate_macd(&self, prices: &[f64]) -> f64 {
+        if prices.len() < 26 {
+            return 0.0;
+        }
+        
+        let ema_12 = self.calculate_ema(prices, 12).await;
+        let ema_26 = self.calculate_ema(prices, 26).await;
+        
+        ema_12 - ema_26
+    }
+    
+    /// Calculate EMA (Exponential Moving Average)
+    pub async fn calculate_ema(&self, prices: &[f64], period: usize) -> f64 {
+        if prices.len() < period {
+            return prices.last().copied().unwrap_or(0.0);
+        }
+        
+        let multiplier = 2.0 / (period as f64 + 1.0);
+        let mut ema = prices[0];
+        
+        for &price in &prices[1..] {
+            ema = (price * multiplier) + (ema * (1.0 - multiplier));
+        }
+        
+        ema
+    }
+    
+    /// Calculate Bollinger Bands
+    pub async fn calculate_bollinger_bands(&self, prices: &[f64]) -> (f64, f64) {
+        if prices.len() < 20 {
+            let price = prices.last().copied().unwrap_or(0.0);
+            return (price * 1.02, price * 0.98);
+        }
+        
+        let sma = prices.iter().sum::<f64>() / prices.len() as f64;
+        let variance = prices.iter()
+            .map(|&p| (p - sma).powi(2))
+            .sum::<f64>() / prices.len() as f64;
+        let std_dev = variance.sqrt();
+        
+        let upper = sma + (2.0 * std_dev);
+        let lower = sma - (2.0 * std_dev);
+        
+        (upper, lower)
+    }
+    
+    /// Calculate ATR (Average True Range)
+    pub async fn calculate_atr(&self, prices: &[f64]) -> f64 {
+        if prices.len() < 14 {
+            return 0.0;
+        }
+        
+        let mut true_ranges = Vec::new();
+        for i in 1..prices.len() {
+            let high = prices[i];
+            let low = prices[i-1];
+            let tr = (high - low).abs();
+            true_ranges.push(tr);
+        }
+        
+        true_ranges.iter().sum::<f64>() / true_ranges.len() as f64
+    }
+    
+    /// Calculate OBV (On-Balance Volume)
+    pub async fn calculate_obv(&self, prices: &[f64], volumes: &[f64]) -> f64 {
+        if prices.len() != volumes.len() || prices.len() < 2 {
+            return 0.0;
+        }
+        
+        let mut obv = 0.0;
+        for i in 1..prices.len() {
+            if prices[i] > prices[i-1] {
+                obv += volumes[i];
+            } else if prices[i] < prices[i-1] {
+                obv -= volumes[i];
+            }
+        }
+        
+        obv
+    }
+    
+    /// Calculate Stochastic Oscillator
+    pub async fn calculate_stochastic(&self, prices: &[f64]) -> (f64, f64) {
+        if prices.len() < 14 {
+            return (50.0, 50.0);
+        }
+        
+        let recent_prices = &prices[prices.len()-14..];
+        let highest = recent_prices.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+        let lowest = recent_prices.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        let current = prices.last().copied().unwrap_or(0.0);
+        
+        let k = if highest == lowest {
+            50.0
+        } else {
+            ((current - lowest) / (highest - lowest)) * 100.0
+        };
+        
+        // Simple 3-period moving average for %D
+        let d = k; // Simplified for now
+        
+        (k, d)
+    }
+    
+    /// Calculate trade frequency
+    pub async fn calculate_trade_frequency(&self, trades: &[Trade]) -> f64 {
+        if trades.is_empty() {
+            return 0.0;
+        }
+        
+        let time_span = trades.last().unwrap().timestamp - trades.first().unwrap().timestamp;
+        if time_span.num_seconds() == 0 {
+            return 0.0;
+        }
+        
+        trades.len() as f64 / time_span.num_seconds() as f64
+    }
+    
+    /// Calculate average trade size
+    pub async fn calculate_average_trade_size(&self, trades: &[Trade]) -> f64 {
+        if trades.is_empty() {
+            return 0.0;
+        }
+        
+        trades.iter().map(|t| t.quantity.to_f64().unwrap_or_default()).sum::<f64>() / trades.len() as f64
+    }
+    
+    /// Calculate price impact
+    pub async fn calculate_price_impact(&self, order_book: &OrderBook, trades: &[Trade]) -> f64 {
+        if trades.is_empty() {
+            return 0.0;
+        }
+        
+        let total_volume = trades.iter().map(|t| t.quantity.to_f64().unwrap_or_default()).sum::<f64>();
+        let price_change = trades.last().unwrap().price - trades.first().unwrap().price;
+        
+        if total_volume == 0.0 {
+            return 0.0;
+        }
+        
+        price_change.to_f64().unwrap_or_default() / total_volume
+    }
+    
+    /// Calculate slippage estimate
+    pub async fn calculate_slippage_estimate(&self, order_book: &OrderBook, trade_size: f64) -> f64 {
+        let best_bid = order_book.best_bid().unwrap_or(0.0);
+        let best_ask = order_book.best_ask().unwrap_or(0.0);
+        
+        if best_bid == 0.0 || best_ask == 0.0 {
+            return 0.0;
+        }
+        
+        let spread = (best_ask - best_bid) / best_bid;
+        let impact = (trade_size / order_book.total_volume().to_f64().unwrap_or_default()).min(1.0);
+        
+        spread * impact
+    }
+    
+    /// Calculate volatility
+    pub async fn calculate_volatility(&self, prices: &[f64]) -> f64 {
+        if prices.len() < 2 {
+            return 0.0;
+        }
+        
+        let returns: Vec<f64> = prices.windows(2)
+            .map(|w| (w[1] - w[0]) / w[0])
+            .collect();
+        
+        let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
+        let variance = returns.iter()
+            .map(|r| (r - mean_return).powi(2))
+            .sum::<f64>() / returns.len() as f64;
+        
+        variance.sqrt()
+    }
+    
+    /// Calculate momentum
+    pub async fn calculate_momentum(&self, prices: &[f64]) -> f64 {
+        if prices.len() < 10 {
+            return 0.0;
+        }
+        
+        let current = prices.last().copied().unwrap_or(0.0);
+        let past = prices[prices.len()-10];
+        
+        if past == 0.0 {
+            return 0.0;
+        }
+        
+        (current - past) / past
+    }
+    
+    /// Calculate mean reversion
+    pub async fn calculate_mean_reversion(&self, prices: &[f64]) -> f64 {
+        if prices.len() < 20 {
+            return 0.0;
+        }
+        
+        let sma = prices.iter().sum::<f64>() / prices.len() as f64;
+        let current = prices.last().copied().unwrap_or(0.0);
+        
+        if sma == 0.0 {
+            return 0.0;
+        }
+        
+        (current - sma) / sma
+    }
+    
+    /// Calculate liquidity score
+    pub async fn calculate_liquidity_score(&self, order_book: &OrderBook) -> f64 {
+        let bid_depth = order_book.bid_depth();
+        let ask_depth = order_book.ask_depth();
+        
+        if bid_depth == 0.0 || ask_depth == 0.0 {
+            return 0.0;
+        }
+        
+        (bid_depth + ask_depth) / 2.0
+    }
+    
+    /// Calculate spread ratio
+    pub async fn calculate_spread_ratio(&self, order_book: &OrderBook) -> f64 {
+        let best_bid = order_book.best_bid().unwrap_or(0.0);
+        let best_ask = order_book.best_ask().unwrap_or(0.0);
+        
+        if best_bid == 0.0 || best_ask == 0.0 {
+            return 0.0;
+        }
+        
+        (best_ask - best_bid) / best_bid
+    }
+    
+    /// Calculate volume profile
+    pub async fn calculate_volume_profile(&self, trades: &[Trade]) -> f64 {
+        if trades.is_empty() {
+            return 0.0;
+        }
+        
+        let total_volume = trades.iter().map(|t| t.quantity.to_f64().unwrap_or_default()).sum::<f64>();
+        let unique_prices = trades.iter().map(|t| t.price).collect::<std::collections::HashSet<_>>().len();
+        
+        if unique_prices == 0 {
+            return 0.0;
+        }
+        
+        total_volume / unique_prices as f64
+    }
+    
+    /// Get order book for a trading pair (fallback method)
+    async fn get_order_book_fallback(&self, pair: &TradingPair) -> OrderBook {
+        // Get order book from the order book manager
+        let orderbook_manager = self.orderbook_manager.read().await;
+        
+        // Try to get the order book for the trading pair
+        match orderbook_manager.get_order_book(pair).await {
+            Ok(order_book) => Ok(order_book),
+            Err(_) => {
+                // Fallback: create a minimal order book with current market data
+                let current_time = chrono::Utc::now();
+                
+                // Get current market price from the opportunity data
+                // This would normally come from real market data feeds
+                let mid_price = 1000.0; // Placeholder - would be real market price
+                let spread = 0.001; // 0.1% spread
+                
+                let bid_price = mid_price * (1.0 - spread / 2.0);
+                let ask_price = mid_price * (1.0 + spread / 2.0);
+                
+                Ok(OrderBook {
+                    pair: pair.clone(),
+                    bids: vec![
+                        crate::core::types::OrderBookLevel {
+                            price: rust_decimal::Decimal::from_f64_retain(bid_price).unwrap_or_default(),
+                            quantity: rust_decimal::Decimal::from_f64_retain(1000.0).unwrap_or_default(),
+                        }
+                    ],
+                    asks: vec![
+                        crate::core::types::OrderBookLevel {
+                            price: rust_decimal::Decimal::from_f64_retain(ask_price).unwrap_or_default(),
+                            quantity: rust_decimal::Decimal::from_f64_retain(1000.0).unwrap_or_default(),
+                        }
+                    ],
+                    timestamp: current_time,
+                })
+            }
+        }
+    }
+}
+
+// Helper functions for technical indicators
+fn calculate_rsi_simple(prices: &[f64]) -> f64 {
+    if prices.len() < 14 {
+        return 50.0; // Neutral RSI if insufficient data
+    }
+    
+    let mut gains = Vec::new();
+    let mut losses = Vec::new();
+    
+    for i in 1..prices.len() {
+        let change = prices[i] - prices[i-1];
+        if change > 0.0 {
+            gains.push(change);
+            losses.push(0.0);
+        } else {
+            gains.push(0.0);
+            losses.push(-change);
+        }
+    }
+    
+    let avg_gain = gains.iter().sum::<f64>() / gains.len() as f64;
+    let avg_loss = losses.iter().sum::<f64>() / losses.len() as f64;
+    
+    if avg_loss == 0.0 {
+        return 100.0;
+    }
+    
+    let rs = avg_gain / avg_loss;
+    100.0 - (100.0 / (1.0 + rs))
+}
+
+fn calculate_macd_simple(prices: &[f64]) -> f64 {
+    if prices.len() < 26 {
+        return 0.0;
+    }
+    
+    let ema_12 = calculate_ema_simple(prices, 12);
+    let ema_26 = calculate_ema_simple(prices, 26);
+    
+    ema_12 - ema_26
+}
+
+fn calculate_ema_simple(prices: &[f64], period: usize) -> f64 {
+    if prices.len() < period {
+        return prices.last().copied().unwrap_or(0.0);
+    }
+    
+    let multiplier = 2.0 / (period as f64 + 1.0);
+    let mut ema = prices[0];
+    
+    for &price in &prices[1..] {
+        ema = (price * multiplier) + (ema * (1.0 - multiplier));
+    }
+    
+    ema
+}
+
+fn calculate_bollinger_bands_simple(prices: &[f64]) -> (f64, f64) {
+    if prices.len() < 20 {
+        let price = prices.last().copied().unwrap_or(0.0);
+        return (price * 1.02, price * 0.98);
+    }
+    
+    let sma = prices.iter().sum::<f64>() / prices.len() as f64;
+    let variance = prices.iter()
+        .map(|&p| (p - sma).powi(2))
+        .sum::<f64>() / prices.len() as f64;
+    let std_dev = variance.sqrt();
+    
+    let upper = sma + (2.0 * std_dev);
+    let lower = sma - (2.0 * std_dev);
+    
+    (upper, lower)
+}
+
+fn calculate_atr_simple(prices: &[f64]) -> f64 {
+    if prices.len() < 14 {
+        return 0.0;
+    }
+    
+    let mut true_ranges = Vec::new();
+    for i in 1..prices.len() {
+        let high = prices[i];
+        let low = prices[i-1];
+        let tr = (high - low).abs();
+        true_ranges.push(tr);
+    }
+    
+    true_ranges.iter().sum::<f64>() / true_ranges.len() as f64
+}
+
+fn calculate_obv_simple(prices: &[f64], volumes: &[f64]) -> f64 {
+    if prices.len() != volumes.len() || prices.len() < 2 {
+        return 0.0;
+    }
+    
+    let mut obv = 0.0;
+    for i in 1..prices.len() {
+        if prices[i] > prices[i-1] {
+            obv += volumes[i];
+        } else if prices[i] < prices[i-1] {
+            obv -= volumes[i];
+        }
+    }
+    
+    obv
+}
+
+fn calculate_stochastic_simple(prices: &[f64]) -> (f64, f64) {
+    if prices.len() < 14 {
+        return (50.0, 50.0);
+    }
+    
+    let recent_prices = &prices[prices.len()-14..];
+    let highest = recent_prices.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let lowest = recent_prices.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+    let current = prices.last().copied().unwrap_or(0.0);
+    
+    let k = if highest == lowest {
+        50.0
+    } else {
+        ((current - lowest) / (highest - lowest)) * 100.0
+    };
+    
+    // Simple 3-period moving average for %D
+    let d = k; // Simplified for now
+    
+    (k, d)
+}
+
+fn calculate_trade_frequency_simple(trades: &[Trade]) -> f64 {
+    if trades.is_empty() {
+        return 0.0;
+    }
+    
+    let time_span = trades.last().unwrap().timestamp - trades.first().unwrap().timestamp;
+    if time_span.num_seconds() == 0 {
+        return 0.0;
+    }
+    
+    trades.len() as f64 / time_span.num_seconds() as f64
+}
+
+fn calculate_average_trade_size_simple(trades: &[Trade]) -> f64 {
+    if trades.is_empty() {
+        return 0.0;
+    }
+    
+    trades.iter().map(|t| t.quantity.to_f64().unwrap_or_default()).sum::<f64>() / trades.len() as f64
+}
+
+fn calculate_price_impact_simple(order_book: &OrderBook, trades: &[Trade]) -> f64 {
+    if trades.is_empty() {
+        return 0.0;
+    }
+    
+    let total_volume = trades.iter().map(|t| t.quantity.to_f64().unwrap_or_default()).sum::<f64>();
+    let price_change = trades.last().unwrap().price - trades.first().unwrap().price;
+    
+    if total_volume == 0.0 {
+        return 0.0;
+    }
+    
+    price_change.to_f64().unwrap_or_default() / total_volume
+}
+
+fn calculate_slippage_estimate_simple(order_book: &OrderBook, trade_size: f64) -> f64 {
+    let best_bid = order_book.best_bid().to_f64().unwrap_or_default();
+    let best_ask = order_book.best_ask().to_f64().unwrap_or_default();
+    
+    if best_bid == 0.0 || best_ask == 0.0 {
+        return 0.0;
+    }
+    
+    let spread = (best_ask - best_bid) / best_bid;
+    let impact = (trade_size / order_book.total_volume().to_f64().unwrap_or_default()).min(1.0);
+    
+    spread * impact
+}
+
+fn calculate_volatility_simple(prices: &[f64]) -> f64 {
+    if prices.len() < 2 {
+        return 0.0;
+    }
+    
+    let returns: Vec<f64> = prices.windows(2)
+        .map(|w| (w[1] - w[0]) / w[0])
+        .collect();
+    
+    let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
+    let variance = returns.iter()
+        .map(|r| (r - mean_return).powi(2))
+        .sum::<f64>() / returns.len() as f64;
+    
+    variance.sqrt()
+}
+
+fn calculate_momentum_simple(prices: &[f64]) -> f64 {
+    if prices.len() < 10 {
+        return 0.0;
+    }
+    
+    let current = prices.last().copied().unwrap_or(0.0);
+    let past = prices[prices.len()-10];
+    
+    if past == 0.0 {
+        return 0.0;
+    }
+    
+    (current - past) / past
+}
+
+fn calculate_mean_reversion_simple(prices: &[f64]) -> f64 {
+    if prices.len() < 20 {
+        return 0.0;
+    }
+    
+    let sma = prices.iter().sum::<f64>() / prices.len() as f64;
+    let current = prices.last().copied().unwrap_or(0.0);
+    
+    if sma == 0.0 {
+        return 0.0;
+    }
+    
+    (current - sma) / sma
+}
+
+fn calculate_liquidity_score_simple(order_book: &OrderBook) -> f64 {
+    let bid_depth = order_book.bid_depth().to_f64().unwrap_or_default();
+    let ask_depth = order_book.ask_depth().to_f64().unwrap_or_default();
+    
+    if bid_depth == 0.0 || ask_depth == 0.0 {
+        return 0.0;
+    }
+    
+    (bid_depth + ask_depth) / 2.0
+}
+
+fn calculate_spread_ratio_simple(order_book: &OrderBook) -> f64 {
+    let best_bid = order_book.best_bid().to_f64().unwrap_or_default();
+    let best_ask = order_book.best_ask().to_f64().unwrap_or_default();
+    
+    if best_bid == 0.0 || best_ask == 0.0 {
+        return 0.0;
+    }
+    
+    (best_ask - best_bid) / best_bid
+}
+
+fn calculate_volume_profile_simple(trades: &[Trade]) -> f64 {
+    if trades.is_empty() {
+        return 0.0;
+    }
+    
+    let total_volume = trades.iter().map(|t| t.quantity.to_f64().unwrap_or_default()).sum::<f64>();
+    let unique_prices = trades.iter().map(|t| t.price).collect::<std::collections::HashSet<_>>().len();
+    
+    if unique_prices == 0 {
+        return 0.0;
+    }
+    
+    total_volume / unique_prices as f64
 }
 

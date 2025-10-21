@@ -5,11 +5,10 @@
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use serde::{Deserialize, Serialize};
 
-use crate::core::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
-use crate::core::health_check::{ComponentHealth, HealthCheckable};
+use crate::core::circuit_breaker::CircuitBreaker;
 
 /// Degradation level of the system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

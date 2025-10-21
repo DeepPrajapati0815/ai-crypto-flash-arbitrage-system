@@ -1,9 +1,6 @@
 use anyhow::Result;
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{info, warn, error};
 
 use crate::ml::neural_networks::{NeuralNetwork, Layer, LayerType, ActivationFunction, Optimizer};

@@ -4,10 +4,9 @@ use crate::core::types::{ArbitrageOpportunity, TradingPair, Decimal};
 use crate::market_data::orderbook::OrderBookManager;
 use anyhow::Result;
 use rust_decimal_macros::dec;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, debug, warn};
+use tracing::{info, debug};
 use uuid::Uuid;
 
 /// Arbitrage detection engine configuration
@@ -157,22 +156,76 @@ impl ArbitrageEngine {
                 return None;
             }
             
-            // Calculate spread
-            let spread = sell_price - buy_price;
-            if spread <= Decimal::ZERO {
-                return None; // No profit opportunity
+            // ✅ PRODUCTION FIX: Validate input bounds to prevent overflow
+            if buy_price < dec!(0.0001) {
+                tracing::warn!("Buy price too small for safe calculation: {}", buy_price);
+                return None;
+            }
+            if sell_price > dec!(1000000) {
+                tracing::warn!("Sell price unrealistically high: {}", sell_price);
+                return None;
             }
             
+            // Calculate spread with checked arithmetic
+            let spread = match sell_price.checked_sub(buy_price) {
+                Some(s) if s > Decimal::ZERO => s,
+                _ => return None, // No profit or overflow
+            };
+            
             // Calculate fees (exchange fees on both sides)
-            let total_fee_bps = self.config.exchange_fee_bps * dec!(2);
-            let fee_cost = buy_price * total_fee_bps / dec!(10000);
+            let total_fee_bps = match self.config.exchange_fee_bps.checked_mul(dec!(2)) {
+                Some(f) => f,
+                None => {
+                    tracing::error!("Fee calculation overflow");
+                    return None;
+                }
+            };
             
-            // Calculate net profit
+            let fee_cost = match buy_price.checked_mul(total_fee_bps) {
+                Some(intermediate) => match intermediate.checked_div(dec!(10000)) {
+                    Some(f) => f,
+                    None => {
+                        tracing::error!("Fee division failed");
+                        return None;
+                    }
+                },
+                None => {
+                    tracing::error!("Fee multiplication overflow");
+                    return None;
+                }
+            };
+            
+            // Calculate net profit with checked operations
             let gross_profit = spread;
-            let net_profit_per_unit = gross_profit - fee_cost;
+            let net_profit_per_unit = match gross_profit.checked_sub(fee_cost) {
+                Some(p) if p > Decimal::ZERO => p,
+                _ => return None, // Not profitable after fees
+            };
             
-            // Calculate profit percentage
-            let profit_percentage = (net_profit_per_unit / buy_price) * dec!(100);
+            // Calculate profit percentage with checked arithmetic
+            let profit_percentage = match net_profit_per_unit.checked_div(buy_price) {
+                Some(ratio) => match ratio.checked_mul(dec!(100)) {
+                    Some(pct) => pct,
+                    None => {
+                        tracing::error!("Profit percentage scaling overflow");
+                        return None;
+                    }
+                },
+                None => {
+                    tracing::error!("Profit percentage division failed");
+                    return None;
+                }
+            };
+            
+            // ✅ PRODUCTION FIX: Sanity check - profit should be reasonable
+            if profit_percentage > dec!(1000) {
+                tracing::warn!("Unrealistic profit percentage: {}%", profit_percentage);
+                return None;
+            }
+            if profit_percentage < dec!(0.001) {
+                tracing::debug!("Profit too small to be viable: {}%", profit_percentage);
+                return None;
+            }
             
             // Check minimum profit threshold
             if profit_percentage < self.config.min_profit_threshold {
@@ -187,13 +240,31 @@ impl ArbitrageEngine {
             };
             
             // Apply conservative liquidity limit (use 80% of available)
-            let conservative_quantity = max_quantity * dec!(0.8);
+            let conservative_quantity = match max_quantity.checked_mul(dec!(0.8)) {
+                Some(q) => q,
+                None => {
+                    tracing::error!("Quantity calculation overflow");
+                    return None;
+                }
+            };
             
-            // Calculate total profit
-            let total_profit = net_profit_per_unit * conservative_quantity;
+            // Calculate total profit with checked arithmetic
+            let total_profit = match net_profit_per_unit.checked_mul(conservative_quantity) {
+                Some(p) => p,
+                None => {
+                    tracing::error!("Total profit calculation overflow");
+                    return None;
+                }
+            };
             
-            // Subtract estimated gas cost
-            let net_profit_after_gas = total_profit - self.config.gas_cost_estimate;
+            // Subtract estimated gas cost with checked arithmetic
+            let net_profit_after_gas = match total_profit.checked_sub(self.config.gas_cost_estimate) {
+                Some(p) => p,
+                None => {
+                    tracing::error!("Gas cost subtraction overflow");
+                    return None;
+                }
+            };
             
             // Check if still profitable after gas
             if net_profit_after_gas <= Decimal::ZERO {
@@ -312,34 +383,47 @@ impl ArbitrageEngine {
             let eth_btc_ob = eth_btc_ob.read().await;
             let eth_usdt_ob = eth_usdt_ob.read().await;
 
-            if let (Some((btc_usdt_ask, btc_usdt_ask_qty)), Some((eth_btc_ask, eth_btc_ask_qty)), Some((eth_usdt_bid, eth_usdt_bid_qty))) = 
-                (btc_usdt_ob.best_ask(), eth_btc_ob.best_ask(), eth_usdt_ob.best_bid()) {
+            // Get all necessary orderbook data for triangular arbitrage
+            // Need: BTC/USDT bid (sell BTC), ETH/USDT ask (buy ETH), ETH/BTC bid (sell ETH for BTC)
+            if let (Some((btc_usdt_bid, btc_usdt_bid_qty)), Some((eth_usdt_ask, eth_usdt_ask_qty)), Some((eth_btc_bid, eth_btc_bid_qty))) = 
+                (btc_usdt_ob.best_bid(), eth_usdt_ob.best_ask(), eth_btc_ob.best_bid()) {
                 
-                // Start with 1 BTC, calculate path: BTC -> ETH -> USDT -> BTC
-                let start_amount = dec!(1);
+                // Triangular arbitrage path: BTC -> USDT -> ETH -> BTC
+                // Start with 1 BTC
+                let start_btc = dec!(1);
                 
-                // Step 1: BTC to ETH
-                let eth_amount = start_amount / btc_usdt_ask;
+                // Step 1: Sell BTC for USDT (using BTC/USDT bid price)
+                let usdt_amount = start_btc * btc_usdt_bid;
                 
-                // Step 2: ETH to BTC (using eth_btc pair)
-                let btc_from_eth = eth_amount * eth_btc_ask;
+                // Step 2: Buy ETH with USDT (using ETH/USDT ask price)
+                let eth_amount = usdt_amount / eth_usdt_ask;
                 
-                // Step 3: Calculate if we made profit
-                let raw_profit = btc_from_eth - start_amount;
+                // Step 3: Sell ETH for BTC (using ETH/BTC bid price)
+                let final_btc = eth_amount * eth_btc_bid;
+                
+                // Step 4: Calculate profit
+                let raw_profit = final_btc - start_btc;
                 
                 // Calculate fees for 3 trades (0.3% each)
                 let total_fee_percentage = self.config.exchange_fee_bps * dec!(3) / dec!(10000);
-                let fee_cost = start_amount * total_fee_percentage;
+                let fee_cost = start_btc * total_fee_percentage;
                 
-                let net_profit = raw_profit - fee_cost - (self.config.gas_cost_estimate / btc_usdt_ask); // Convert gas cost to BTC
-                let profit_percentage = (net_profit / start_amount) * dec!(100);
+                // Convert gas cost from USD to BTC using current BTC/USDT price
+                let gas_cost_btc = self.config.gas_cost_estimate / btc_usdt_bid;
+                let net_profit = raw_profit - fee_cost - gas_cost_btc;
+                let profit_percentage = (net_profit / start_btc) * dec!(100);
                 
                 // Check minimum profit threshold
                 if profit_percentage > self.config.min_profit_threshold {
-                    // Calculate maximum executable quantity based on liquidity
-                    let max_qty_step1 = btc_usdt_ask_qty * dec!(0.8); // Conservative 80%
-                    let max_qty_step2 = eth_btc_ask_qty * btc_usdt_ask * dec!(0.8);
-                    let max_qty_step3 = eth_usdt_bid_qty / eth_btc_ask * dec!(0.8);
+                    // Calculate maximum executable quantity based on liquidity at each step
+                    // Step 1: BTC -> USDT (limited by BTC/USDT bid liquidity)
+                    let max_qty_step1 = btc_usdt_bid_qty * dec!(0.8); // Conservative 80%
+                    
+                    // Step 2: USDT -> ETH (limited by ETH/USDT ask liquidity converted to BTC equivalent)
+                    let max_qty_step2 = eth_usdt_ask_qty * eth_usdt_ask / btc_usdt_bid * dec!(0.8);
+                    
+                    // Step 3: ETH -> BTC (limited by ETH/BTC bid liquidity)
+                    let max_qty_step3 = eth_btc_bid_qty * eth_btc_bid * dec!(0.8);
                     
                     let max_quantity = max_qty_step1.min(max_qty_step2).min(max_qty_step3);
                     
@@ -350,19 +434,23 @@ impl ArbitrageEngine {
                     let confidence = base_confidence + liquidity_bonus + spread_bonus;
                     
                     if confidence >= self.config.min_confidence {
+                        // For triangular arbitrage, buy_price represents entry point (BTC/USDT)
+                        // sell_price represents effective exit after full cycle
+                        let effective_exit_price = btc_usdt_bid * (dec!(1) + profit_percentage / dec!(100));
+                        
                         return Some(ArbitrageOpportunity {
                             id: Uuid::new_v4().to_string(),
                             pair: TradingPair::new("BTC", "USDT"),
                             buy_exchange: "triangular".to_string(),
                             sell_exchange: "triangular".to_string(),
-                            buy_price: btc_usdt_ask,
-                            sell_price: btc_usdt_ask + net_profit, // Effective sell price after triangular path
+                            buy_price: btc_usdt_bid, // Entry price (selling BTC for USDT)
+                            sell_price: effective_exit_price, // Effective exit after BTC->USDT->ETH->BTC cycle
                             profit_percentage,
                             profit_amount: net_profit * max_quantity,
                             max_quantity,
                             timestamp: chrono::Utc::now(),
                             confidence,
-                            opportunity_type: "Triangular Arbitrage".to_string(),
+                            opportunity_type: "Triangular Arbitrage (BTC→USDT→ETH→BTC)".to_string(),
                         });
                     }
                 }

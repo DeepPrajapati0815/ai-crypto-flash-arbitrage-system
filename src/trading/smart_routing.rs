@@ -3,12 +3,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error, warn};
-use uuid::Uuid;
+use tracing::{info, warn};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
-use crate::core::types::{Order, OrderSide, OrderType, OrderStatus, TradingPair};
+use crate::core::types::{Order, OrderSide, OrderType};
 
 /// Smart routing strategies
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -491,7 +490,7 @@ impl RoutingAlgorithm for BestPriceRouter {
     fn route(&self, order: &Order, exchanges: &HashMap<String, ExchangeInfo>) -> Result<RoutingDecision> {
         let mut best_exchange = None;
         let mut best_price = Decimal::MAX;
-        let mut reasoning = String::new();
+        let reasoning = String::new();
 
         for (name, info) in exchanges {
             // Calculate effective price including fees

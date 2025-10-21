@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error, warn};
+use tracing::info;
 use uuid::Uuid;
 use chrono::Utc;
 use rust_decimal::Decimal;

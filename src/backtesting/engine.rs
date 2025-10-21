@@ -6,14 +6,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::str::FromStr;
 use tokio::sync::RwLock;
-use tracing::{info, debug, error, warn};
+use tracing::info;
 use chrono::{DateTime, Utc, Duration};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use uuid::Uuid;
 use reqwest::Client;
 
-use crate::core::types::{TradingPair, ArbitrageOpportunity, Order, OrderSide, OrderType, OrderStatus};
+use crate::core::types::{TradingPair, ArbitrageOpportunity};
 use crate::core::config::Config;
 use super::data::HistoricalData;
 use super::metrics::BacktestMetrics;
@@ -386,7 +386,7 @@ impl BacktestEngine {
     /// Calculate gas costs for on-chain operations
     async fn calculate_gas_cost(&self, opportunity: &ArbitrageOpportunity) -> Result<Decimal> {
         use reqwest::Client;
-        use serde_json::json;
+        
         
         let client = Client::new();
         

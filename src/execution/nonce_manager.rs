@@ -66,40 +66,62 @@ impl NonceManager {
     }
 
     /// Get next available nonce for an address (atomically increments)
+    /// CRITICAL FIX: Enhanced atomicity to prevent race conditions
     pub async fn get_next_nonce(&self, address: Address) -> Result<u64> {
         // Get or create state for this address
         let state_ref = self.states.entry(address)
             .or_insert_with(|| Arc::new(RwLock::new(NonceState::new(0))))
             .clone();
         
-        let mut state = state_ref.write().await;
-        
-        // If using Redis, try to get distributed nonce
-        if let Some(redis_client) = &self.redis_client {
-            match self.get_nonce_from_redis(redis_client, address).await {
-                Ok(redis_nonce) => {
-                    // Use Redis nonce if higher than local
-                    if redis_nonce > state.next_available {
-                        state.next_available = redis_nonce;
+        // CRITICAL FIX: Use atomic operation with proper locking to prevent race conditions
+        let nonce = {
+            let mut state = state_ref.write().await;
+            
+            // If using Redis, try to get distributed nonce (with timeout)
+            if let Some(redis_client) = &self.redis_client {
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_millis(100),
+                    self.get_nonce_from_redis(redis_client, address)
+                ).await {
+                    Ok(Ok(redis_nonce)) => {
+                        // Use Redis nonce if higher than local
+                        if redis_nonce > state.next_available {
+                            state.next_available = redis_nonce;
+                        }
+                    },
+                    Ok(Err(e)) => {
+                        warn!("Failed to get nonce from Redis: {}", e);
+                    },
+                    Err(_) => {
+                        warn!("Redis nonce fetch timed out, using local nonce");
                     }
-                },
-                Err(e) => {
-                    warn!("Failed to get nonce from Redis, using local: {}", e);
                 }
             }
-        }
+            
+            // Get next nonce and mark as pending atomically
+            let nonce = state.next_available;
+            state.next_available += 1;
+            state.pending.push(nonce);
+            
+            debug!("Allocated nonce {} for address {:?}", nonce, address);
+            nonce
+        };
         
-        // Get next nonce and mark as pending
-        let nonce = state.next_available;
-        state.next_available += 1;
-        state.pending.push(nonce);
-        
-        debug!("Allocated nonce {} for address {:?}", nonce, address);
-        
-        // If using Redis, update distributed state
+        // If using Redis, update distributed state (outside the lock with timeout)
         if let Some(redis_client) = &self.redis_client {
-            if let Err(e) = self.set_nonce_in_redis(redis_client, address, state.next_available).await {
-                error!("Failed to update nonce in Redis: {}", e);
+            match tokio::time::timeout(
+                tokio::time::Duration::from_millis(100),
+                self.set_nonce_in_redis(redis_client, address, nonce + 1)
+            ).await {
+                Ok(Ok(_)) => {
+                    // Successfully updated nonce in Redis
+                },
+                Ok(Err(redis_err)) => {
+                    error!("Failed to update nonce in Redis: {}", redis_err);
+                },
+                Err(_) => {
+                    warn!("Redis nonce update timed out");
+                }
             }
         }
         
@@ -227,7 +249,7 @@ impl NonceManager {
         redis::cmd("SET")
             .arg(&key)
             .arg(nonce)
-            .query_async(&mut conn)
+            .query_async::<_, ()>(&mut conn)
             .await?;
         
         Ok(())

@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -11,7 +11,6 @@ use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
 use std::str::FromStr;
 use reqwest::Client;
 use serde_json::json;
-use crate::core::types::{TradingPair, ArbitrageOpportunity};
 
 /// Supported blockchain networks
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -623,7 +622,7 @@ impl CrossChainArbitrageManager {
     /// Get token price on a specific chain using real DEX aggregators
     async fn get_token_price(&self, token: &str, chain: &Blockchain) -> Result<Decimal> {
         use reqwest::Client;
-        use serde_json::json;
+        
         
         let client = Client::new();
         let rpc_url = self.get_chain_rpc_url(chain)?;

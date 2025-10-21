@@ -4,10 +4,8 @@ use anyhow::Result;
 use ethers_core::types::{Address, U256};
 use ethers_providers::{Middleware, Provider, Http};
 use ethers_contract::abigen;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
-use tracing::{info_span, debug, info, warn, error};
+use tracing::{info_span, debug, info};
 
 abigen!(
     UniswapV3Quoter, r#"[

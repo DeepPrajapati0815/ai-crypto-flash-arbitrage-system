@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use chrono::{DateTime, Utc};
-use tracing::{info, warn, debug};
+use tracing::{info, debug};
 
 /// A/B test result
 #[derive(Debug, Clone, Serialize, Deserialize)]

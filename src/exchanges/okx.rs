@@ -5,15 +5,13 @@ use crate::exchanges::manager::{OrderManager, ExchangeConnector, ExchangeConfig}
 use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
-use tracing::{info, debug, error, warn};
-use url::Url;
+use tokio_tungstenite::connect_async;
+use tracing::info;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use hex;
 use base64;
 use serde_json;
 

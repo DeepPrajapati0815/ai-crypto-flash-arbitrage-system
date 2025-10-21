@@ -1,18 +1,15 @@
 //! Uniswap V3 connector for DEX trading
 
-use crate::core::types::{Order, OrderStatus, TradingPair, Decimal, OrderSide, OrderType};
+use crate::core::types::{Order, OrderStatus, TradingPair, Decimal, OrderSide};
 use crate::exchanges::manager::{OrderManager, ExchangeConnector, ExchangeConfig};
 use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error, warn};
-use chrono::Utc;
+use tracing::info;
 use ethers_providers::{Provider, Http, Middleware};
 use ethers_signers::{LocalWallet, Signer};
-use ethers_core::types::{Address, U256, H160};
-use ethers_contract::{Contract, ContractInstance};
+use ethers_core::types::Address;
 use std::str::FromStr;
 
 /// Uniswap V3 connector

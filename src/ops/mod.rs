@@ -6,9 +6,6 @@
 //! - Operational dashboards and reporting
 
 pub mod health;
+pub mod production_readiness;
 
-pub use health::{
-    HealthMonitor, HealthConfig, SystemHealth, HealthStatus, 
-    HealthCheck, RpcHealth, RelayHealth, HealthAlert,
-    AlertType, AlertSeverity, HealthEndpoint
-};
+

@@ -6,7 +6,7 @@ pub mod uniswap;
 pub mod manager;
 pub mod rate_limiter;
 
-pub use manager::{OrderManager, ExchangeConnector, UnifiedExchangeManager, ExchangeConfig};
+pub use manager::{UnifiedExchangeManager, ExchangeConfig};
 
 // Re-export exchange-specific connectors
 pub use binance::BinanceConnector;

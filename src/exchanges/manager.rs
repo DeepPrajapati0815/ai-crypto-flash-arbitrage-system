@@ -1,6 +1,6 @@
 //! Unified order management interface for all exchanges
 
-use crate::core::types::{Order, OrderStatus, TradingPair, Decimal, OrderSide, OrderType};
+use crate::core::types::{Order, OrderStatus, TradingPair, Decimal};
 use crate::exchanges::rate_limiter::{ExchangeRateLimiters, handle_rate_limit_exceeded};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, debug, error, warn};
-use uuid::Uuid;
+use tracing::{info, debug, warn};
 use chrono::Utc;
 
 /// Unified order management interface

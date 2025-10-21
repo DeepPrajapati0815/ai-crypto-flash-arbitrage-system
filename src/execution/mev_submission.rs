@@ -3,10 +3,9 @@
 use anyhow::Result;
 use ethers_core::types::{Address, U256, H256, TransactionRequest};
 use ethers_providers::{Middleware, Provider, Http};
-use ethers_signers::{LocalWallet, Signer};
+use ethers_signers::Signer;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::timeout;
 use tracing::{info, warn, error, debug, info_span};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
@@ -120,7 +119,7 @@ impl MEVSubmissionManager {
         asset: Address,
         amount: U256,
         routes: &[TradeRoute],
-        token_resolver: &dyn Fn(&str) -> Option<Address>,
+        token_resolver: &crate::execution::mev_tx::TokenResolver,
     ) -> Result<MEVSubmissionResult> {
         let submission_id = Uuid::new_v4();
         let _span = info_span!("mev_submission",
@@ -139,7 +138,7 @@ impl MEVSubmissionManager {
             self.config.flash_arb_contract_address,
         )?;
 
-        let tx_request = tx_builder.build_call(asset, amount, routes, token_resolver).await?;
+        let tx_request = tx_builder.build_call(asset, amount, routes, token_resolver, None).await?; // None = use current gas price
 
         // Try primary strategy first
         let mut strategies = vec![self.config.primary_strategy.clone()];
@@ -292,7 +291,7 @@ impl MEVSubmissionManager {
 
         // Monitor bundle status with real-time checking
         let mut max_checks = 20; // Check for up to 40 seconds
-        let mut check_interval = Duration::from_secs(2);
+        let check_interval = Duration::from_secs(2);
         
         while max_checks > 0 {
             tokio::time::sleep(check_interval).await;
@@ -404,7 +403,7 @@ impl MEVSubmissionManager {
 
         // Monitor transaction status with real-time checking
         let mut max_checks = 30; // Check for up to 60 seconds
-        let mut check_interval = Duration::from_secs(2);
+        let check_interval = Duration::from_secs(2);
         
         while max_checks > 0 {
             tokio::time::sleep(check_interval).await;
@@ -582,8 +581,8 @@ impl MEVSubmissionManager {
     
     /// Build real arbitrage bundle from transaction request
     async fn build_arbitrage_bundle(&self, tx_request: &TransactionRequest) -> Result<crate::mev::bundle_builder::ArbitrageBundle> {
-        use ethers_core::types::{Transaction, U256, Address, H256};
-        use std::str::FromStr;
+        use ethers_core::types::U256;
+        
         
         // Extract transaction data
         let to_address = match tx_request.to.as_ref().ok_or_else(|| anyhow::anyhow!("Missing 'to' address"))? {
@@ -629,7 +628,7 @@ impl MEVSubmissionManager {
     /// Build flash loan transaction
     async fn build_flash_loan_transaction(&self, to: &Address, value: &U256, data: &[u8], gas_limit: &U256) -> Result<Vec<u8>> {
         use ethers_core::abi::{encode, Token};
-        use ethers_core::types::{TransactionRequest, U256};
+        use ethers_core::types::U256;
         
         // Flash loan function selector: flashLoanSimple(address,address,uint256,bytes,uint16)
         let function_selector = [0x5c, 0x60, 0x41, 0x1c]; // flashLoanSimple(address,address,uint256,bytes,uint16)
@@ -773,8 +772,8 @@ impl MEVSubmissionManager {
     
     /// Get current gas prices from network
     async fn get_current_gas_prices(&self) -> Result<(U256, U256)> {
-        use ethers_providers::{Provider, Http};
-        use std::str::FromStr;
+        
+        
         
         // Get gas prices from multiple sources
         let gas_sources = vec![

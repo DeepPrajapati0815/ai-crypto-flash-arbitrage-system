@@ -6,12 +6,11 @@ use ethers_providers::{Middleware, Provider, Http};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{info, warn, error, debug};
+use tracing::info;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::database::{postgres::PostgresManager, redis::RedisManager};
-use crate::core::types::TradingPair;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
 

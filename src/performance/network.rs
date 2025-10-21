@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, debug, error, warn};
+use tracing::{info, warn};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 

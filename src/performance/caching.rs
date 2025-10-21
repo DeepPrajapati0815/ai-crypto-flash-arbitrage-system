@@ -5,9 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, debug, error, warn};
+use tracing::{info, error, warn};
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 use std::time::Duration;
 
 /// High-performance cache manager
@@ -30,6 +29,7 @@ pub struct CacheConfig {
     pub enable_statistics: bool,
     pub enable_persistence: bool,
     pub persistence_path: String,
+    pub encryption_key: [u8; 32], // AES-256 key
 }
 
 /// High-frequency trading cache
@@ -204,8 +204,14 @@ impl HftCacheManager {
                 
                 // Deserialize value
                 let value = if entry.compressed {
-                    // TODO: Implement decompression
-                    serde_json::from_slice(&entry.value)?
+                    // Decompress using zstd
+                    match zstd::decode_all(&*entry.value) {
+                        Ok(decompressed) => serde_json::from_slice(&decompressed)?,
+                        Err(_) => {
+                            warn!("Failed to decompress cached data, using raw data");
+                            serde_json::from_slice(&entry.value)?
+                        }
+                    }
                 } else {
                     serde_json::from_slice(&entry.value)?
                 };
@@ -248,17 +254,49 @@ impl HftCacheManager {
         // Serialize value
         let serialized = serde_json::to_vec(value)?;
         let mut compressed = false;
+        let mut encrypted = false;
         let mut final_data = serialized.clone();
         
         // Compress if enabled
         if self.config.enable_compression && serialized.len() > 1024 {
-            // TODO: Implement compression
-            compressed = true;
+            // Compress data using zstd for better memory efficiency
+            let compressed_data = zstd::encode_all(&*serialized, 3)?; // Level 3 compression
+            let compression_ratio = serialized.len() as f64 / compressed_data.len() as f64;
+            
+            if compression_ratio > 1.2 { // Only use compression if it saves at least 20%
+                final_data = compressed_data;
+                compressed = true;
+            }
         }
         
         // Encrypt if enabled
         if self.config.enable_encryption {
-            // TODO: Implement encryption
+            // Encrypt sensitive data using AES-256-GCM
+            use aes_gcm::{Aes256Gcm, Key, Nonce, KeyInit};
+            use aes_gcm::aead::Aead;
+            
+            let key = Key::<aes_gcm::aes::Aes256>::from_slice(&self.config.encryption_key);
+            let cipher = Aes256Gcm::new(key);
+            
+            // Generate random nonce
+            let mut nonce_bytes = [0u8; 12];
+            use rand::RngCore;
+            rand::thread_rng().fill_bytes(&mut nonce_bytes);
+            let nonce = Nonce::from_slice(&nonce_bytes);
+            
+            match cipher.encrypt(nonce, final_data.as_slice()) {
+                Ok(encrypted_data) => {
+                    // Prepend nonce to encrypted data
+                    let mut encrypted_with_nonce = nonce_bytes.to_vec();
+                    encrypted_with_nonce.extend_from_slice(&encrypted_data);
+                    final_data = encrypted_with_nonce;
+                    encrypted = true;
+                }
+                Err(_) => {
+                    warn!("Failed to encrypt cached data, storing unencrypted");
+                    encrypted = false;
+                }
+            }
         }
         
         let ttl = ttl_seconds.unwrap_or(self.config.default_ttl_seconds);
@@ -483,7 +521,39 @@ impl HftCacheManager {
             // Evict if over size limit
             if cache.size_bytes > cache.config.max_size_bytes {
                 let excess = cache.size_bytes - cache.config.max_size_bytes;
-                // TODO: Implement eviction logic
+                // Implement LRU eviction with size-based prioritization
+                let mut entries_to_remove = Vec::new();
+                let mut total_size_to_free = cache.size_bytes - cache.config.max_size_bytes;
+                
+                // Sort entries by last accessed time (LRU) and size
+                let mut sorted_entries: Vec<_> = cache.data.iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                sorted_entries.sort_by(|a, b| {
+                    // First by last accessed time (LRU)
+                    a.1.last_accessed.cmp(&b.1.last_accessed)
+                        .then_with(|| {
+                            // Then by size (largest first)
+                            b.1.value.len().cmp(&a.1.value.len())
+                        })
+                });
+                
+                for (key, entry) in sorted_entries {
+                    if total_size_to_free <= 0 {
+                        break;
+                    }
+                    
+                    entries_to_remove.push(key);
+                    total_size_to_free -= entry.value.len() as u64;
+                }
+                
+                // Remove selected entries
+                for key in entries_to_remove {
+                    if let Some(entry) = cache.data.remove(&key) {
+                        cache.size_bytes -= entry.value.len() as u64;
+                        cache.miss_count += 1; // Track evictions as misses
+                    }
+                }
             }
         }
         

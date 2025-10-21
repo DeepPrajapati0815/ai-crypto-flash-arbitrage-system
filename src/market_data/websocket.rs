@@ -1,6 +1,6 @@
 //! WebSocket market data streaming for real-time price feeds
 
-use crate::core::types::{MarketDataUpdate, TradingPair, OrderBook, Trade, Ticker, PriceLevel};
+use crate::core::types::{TradingPair, Ticker};
 use crate::core::config::Config;
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
@@ -10,7 +10,6 @@ use tokio::sync::{RwLock, mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tracing::{info, error, debug, warn};
 use url::Url;
-use uuid::Uuid;
 
 /// WebSocket manager for market data streaming
 pub struct WebSocketManager {
@@ -165,13 +164,31 @@ impl WebSocketManager {
             data.get("s").and_then(|s| s.as_str()),
             data.get("c").and_then(|c| c.as_str())
         ) {
-            // Parse symbol (e.g., "BTCUSDT" -> "BTC", "USDT")
-            let (base, quote) = if symbol.len() > 3 {
-                let base = &symbol[..symbol.len() - 4];
-                let quote = &symbol[symbol.len() - 4..];
-                (base.to_string(), quote.to_string())
-            } else {
-                ("BTC".to_string(), "USDT".to_string())
+            // PRODUCTION FIX: Robust symbol parsing with known quote currencies
+            // Common Binance quote currencies (ordered by length, longest first)
+            const QUOTE_CURRENCIES: &[&str] = &["USDT", "USDC", "BUSD", "TUSD", "USDS", "BTC", "ETH", "BNB", "XRP", "EUR", "GBP", "DAI", "PAX"];
+            
+            let (base, quote) = {
+                let mut found = None;
+                for quote_currency in QUOTE_CURRENCIES {
+                    if symbol.ends_with(quote_currency) && symbol.len() > quote_currency.len() {
+                        let base_part = &symbol[..symbol.len() - quote_currency.len()];
+                        found = Some((base_part.to_string(), quote_currency.to_string()));
+                        break;
+                    }
+                }
+                
+                // Fallback: if no known quote found, assume last 4 chars (old behavior)
+                found.unwrap_or_else(|| {
+                    if symbol.len() > 4 {
+                        let base = &symbol[..symbol.len() - 4];
+                        let quote = &symbol[symbol.len() - 4..];
+                        (base.to_string(), quote.to_string())
+                    } else {
+                        tracing::warn!("Cannot parse Binance symbol '{}', using BTC/USDT default", symbol);
+                        ("BTC".to_string(), "USDT".to_string())
+                    }
+                })
             };
 
             let pair = TradingPair::new(&base, &quote);
@@ -239,6 +256,7 @@ impl WebSocketManager {
 
         // Spawn connection handler with real reconnection logic
         let config = self.config.clone();
+        let ticker_sender_arc = self.ticker_sender.clone(); // ✅ PRODUCTION FIX: Clone Arc for task
         let handle = tokio::spawn(async move {
             let mut reconnect_attempts = 0;
             const MAX_RECONNECT_ATTEMPTS: u32 = 5;
@@ -248,7 +266,10 @@ impl WebSocketManager {
                     match msg {
                         Ok(Message::Text(text)) => {
                             if let Ok(data) = serde_json::from_str::<Value>(&text) {
-                                Self::handle_okx_message(data).await;
+                                // PRODUCTION FIX: Acquire read lock and pass ticker_sender
+                                let ticker_sender_guard = ticker_sender_arc.read().await;
+                                let ticker_sender_ref = ticker_sender_guard.as_ref();
+                                Self::handle_okx_message(data, ticker_sender_ref).await;
                             } else {
                                 error!("Failed to parse OKX message: {}", text);
                             }
@@ -318,7 +339,8 @@ impl WebSocketManager {
 
 
     /// Handle OKX WebSocket messages
-    async fn handle_okx_message(data: Value) {
+    /// PRODUCTION FIX: Now forwards tickers downstream via sender
+    async fn handle_okx_message(data: Value, ticker_sender: Option<&mpsc::Sender<Ticker>>) {
         if let Some(arg) = data["arg"].as_object() {
             if let Some(channel) = arg["channel"].as_str() {
                 if channel == "tickers" {
@@ -330,16 +352,41 @@ impl WebSocketManager {
                                         let parts: Vec<&str> = inst_id.split('-').collect();
                                         if parts.len() == 2 {
                                             let pair = TradingPair::new(parts[0], parts[1]);
+                                            
+                                            // Extract bid/ask if available
+                                            let bid = ticker_data["bidPx"]
+                                                .as_str()
+                                                .and_then(|s| rust_decimal::Decimal::from_str_exact(s).ok())
+                                                .unwrap_or(price_decimal);
+                                            let ask = ticker_data["askPx"]
+                                                .as_str()
+                                                .and_then(|s| rust_decimal::Decimal::from_str_exact(s).ok())
+                                                .unwrap_or(price_decimal);
+                                            let volume_24h = ticker_data["vol24h"]
+                                                .as_str()
+                                                .and_then(|s| rust_decimal::Decimal::from_str_exact(s).ok())
+                                                .unwrap_or(rust_decimal::Decimal::ZERO);
+                                            
                                             let ticker = Ticker {
                                                 pair,
                                                 last_price: price_decimal,
-                                                bid: price_decimal, // Simplified
-                                                ask: price_decimal, // Simplified
-                                                volume_24h: rust_decimal::Decimal::ZERO, // Simplified
+                                                bid,
+                                                ask,
+                                                volume_24h,
                                                 timestamp: chrono::Utc::now(),
                                             };
                                             
-                                            debug!("OKX ticker update: {} = {}", inst_id, last_price);
+                                            debug!("OKX ticker update: {} = {} (bid: {}, ask: {})", 
+                                                inst_id, last_price, bid, ask);
+                                            
+                                            // CRITICAL FIX: Send ticker downstream for processing
+                                            if let Some(sender) = ticker_sender {
+                                                if let Err(e) = sender.try_send(ticker) {
+                                                    tracing::warn!("Failed to send OKX ticker: {}", e);
+                                                }
+                                            } else {
+                                                tracing::warn!("No ticker sender available for OKX data");
+                                            }
                                         }
                                     }
                                 }

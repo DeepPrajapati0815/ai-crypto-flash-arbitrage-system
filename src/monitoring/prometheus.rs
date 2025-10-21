@@ -14,7 +14,6 @@ use prometheus::{
     register_int_gauge_with_registry,
     register_histogram_with_registry,
 };
-use std::sync::Arc;
 use tracing::{info, error};
 
 lazy_static! {

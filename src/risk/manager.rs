@@ -5,11 +5,10 @@ use crate::risk::correlation::{CorrelationAnalyzer, PortfolioPosition};
 use crate::risk::dynamic_scaling::DynamicRiskScaler;
 use rust_decimal::prelude::ToPrimitive;
 use anyhow::Result;
-use rust_decimal_macros::dec;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, warn};
 
 /// Risk manager for position and exposure control
 pub struct RiskManager {

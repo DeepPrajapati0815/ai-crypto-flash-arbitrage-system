@@ -3,11 +3,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use tracing::{info, debug, error, warn};
-use uuid::Uuid;
+use tracing::info;
 use chrono::Utc;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 
 /// Neural network architecture
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,20 +219,14 @@ impl NeuralNetworkManager {
         weights
     }
 
-    /// Generate random normal distribution (simplified)
+    /// Generate random normal distribution using proper statistical methods
     fn random_normal() -> f64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use rand::Rng;
+        use rand::distributions::Distribution;
+        use rand_distr::StandardNormal;
         
-        let mut hasher = DefaultHasher::new();
-        Uuid::new_v4().hash(&mut hasher);
-        let hash = hasher.finish();
-        
-        // Convert to normal distribution using Box-Muller transform (simplified)
-        let u1 = (hash % 10000) as f64 / 10000.0;
-        let u2 = ((hash / 10000) % 10000) as f64 / 10000.0;
-        
-        (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
+        let mut rng = rand::thread_rng();
+        StandardNormal.sample(&mut rng)
     }
 
     /// Train a neural network with real production implementation

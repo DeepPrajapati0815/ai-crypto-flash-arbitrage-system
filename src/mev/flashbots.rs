@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{info, debug, error, warn};
 use uuid::Uuid;
-use chrono::Utc;
 
 /// Flashbots bundle for MEV protection
 #[derive(Debug, Clone, Serialize, Deserialize)]

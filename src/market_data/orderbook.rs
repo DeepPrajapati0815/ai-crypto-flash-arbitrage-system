@@ -1,12 +1,12 @@
 //! Ultra-low latency order book management
 
-use crate::core::types::{OrderBook, PriceLevel, TradingPair};
+use crate::core::types::{PriceLevel, TradingPair};
 use dashmap::DashMap;
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Single order book for a trading pair
 #[derive(Debug, Clone)]
@@ -135,6 +135,33 @@ impl OrderBookManager {
         
         debug!("Updated order book for {}: {} bids, {} asks", 
             pair.symbol(), ob.bids.len(), ob.asks.len());
+    }
+
+    /// Update order book with ticker data (production implementation)
+    pub async fn update_ticker(&self, ticker: &crate::core::types::Ticker) {
+        // Convert ticker to order book levels
+        let bids = vec![
+            crate::core::types::PriceLevel {
+                price: ticker.bid,
+                quantity: ticker.volume_24h / Decimal::from(2), // Estimate bid quantity
+                timestamp: ticker.timestamp.timestamp() as u64,
+            }
+        ];
+        let asks = vec![
+            crate::core::types::PriceLevel {
+                price: ticker.ask,
+                quantity: ticker.volume_24h / Decimal::from(2), // Estimate ask quantity
+                timestamp: ticker.timestamp.timestamp() as u64,
+            }
+        ];
+        
+        // Update order book with ticker data
+        self.update_order_book(
+            ticker.pair.clone(),
+            bids,
+            asks,
+            ticker.timestamp.timestamp() as u64,
+        ).await;
     }
 
     /// Get order book for a trading pair

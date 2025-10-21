@@ -2,9 +2,7 @@
 
 use anyhow::Result;
 use std::process::Command;
-use std::time::Duration;
-use tokio::time::sleep;
-use tracing::{info, warn, error, debug};
+use tracing::info;
 use serde::{Deserialize, Serialize};
 
 /// CPU optimization manager

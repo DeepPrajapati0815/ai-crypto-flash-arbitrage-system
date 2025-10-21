@@ -1,13 +1,12 @@
 //! Exchange API integration and management
 
-use crate::core::types::{Order, OrderSide, OrderType, OrderStatus, TradingPair, Decimal, Exchange};
+use crate::core::types::{Order, OrderSide, OrderType, OrderStatus, Decimal};
 use crate::core::config::Config;
 use anyhow::Result;
 use reqwest::Client;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{info, debug, error, warn};
+use tracing::{info, debug, error};
 
 /// Exchange manager for handling multiple exchanges
 pub struct ExchangeManager {

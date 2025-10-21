@@ -1,13 +1,13 @@
 //! RouteBuilder: materialize FlashArb TradeRoute[] from routing/opportunity
 
-use crate::core::types::{ArbitrageOpportunity, TradingPair, Decimal};
+use crate::core::types::{ArbitrageOpportunity, Decimal};
 use crate::execution::quoting::OnChainQuoter;
 use ethers_core::types::{Address, U256};
 use ethers_providers::Middleware;
 use std::collections::HashMap;
 use std::str::FromStr;
 use anyhow::Result;
-use tracing::{info_span, debug, info, warn, error};
+use tracing::{info_span, debug, info, error};
 
 #[derive(Debug, Clone)]
 pub enum DexType {

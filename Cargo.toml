@@ -48,8 +48,9 @@ sha2 = "0.10"
 hex = "0.4"
 base64 = "0.21"
 hmac = "0.12"
-zeroize = "1.7"
 aes-gcm = "0.10"
+zstd = "0.12"
+zeroize = "1.7"
 pbkdf2 = "0.12"
 
 # Concurrent data structures

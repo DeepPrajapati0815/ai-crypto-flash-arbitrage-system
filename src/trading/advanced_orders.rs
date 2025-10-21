@@ -3,12 +3,12 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error, warn};
+use tracing::{info, debug, warn};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
-use crate::core::types::{Order, OrderSide, OrderType, OrderStatus, TradingPair};
+use crate::core::types::{OrderSide, TradingPair};
 
 /// Advanced order types for sophisticated trading
 #[derive(Debug, Clone, Serialize, Deserialize)]

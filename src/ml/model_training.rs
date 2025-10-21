@@ -3,10 +3,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use tracing::{info, debug, error, warn};
+use tracing::info;
 use chrono::Utc;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 
 /// Model training manager with memory-bounded data structures
 pub struct ModelTrainingManager {
@@ -656,7 +654,7 @@ impl ModelTrainingManager {
         info!("Training Ensemble model");
         
         // Train multiple models and combine predictions
-        let mut ensemble_models: Vec<String> = Vec::new();
+        let ensemble_models: Vec<String> = Vec::new();
         
         // Train different model types
         let linear_result = self.train_linear_regression(train_data, validation_data, test_data, hyperparameters).await?;

@@ -69,6 +69,12 @@ impl ONNXArbitragePredictor {
         self.predict_confidence(opportunity).await
     }
     
+    /// Predict from pre-extracted features
+    pub async fn predict_from_features(&self, features: &[f32]) -> Result<f32> {
+        // Use model manager to run prediction on features
+        self.model_manager.predict(features).await
+    }
+    
     /// Predict for batch of opportunities
     pub async fn predict_batch(
         &self,

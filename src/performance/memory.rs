@@ -5,11 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, debug, error, warn};
+use tracing::info;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::ptr::NonNull;
+use std::alloc::{GlobalAlloc, Layout};
 
 /// Memory manager for HFT trading
 pub struct HftMemoryManager {
@@ -221,7 +220,7 @@ impl HftMemoryManager {
                 self.update_allocation_stats(size as u64).await;
                 
                 return Ok(AllocationResult {
-                    ptr: std::ptr::null_mut(), // TODO: Implement actual pointer
+                    ptr: self.allocate_memory_block(size),
                     size,
                     pool_id: pool.name.clone(),
                     block_id,
@@ -233,14 +232,49 @@ impl HftMemoryManager {
         // No pool available, fall back to system allocation
         self.allocate_from_system(size).await
     }
+    
+    /// Allocate memory block from pool
+    fn allocate_memory_block(&self, size: usize) -> *mut u8 {
+        // For now, use system allocation as fallback
+        // In a real implementation, this would use the memory pool
+        use std::alloc::{alloc, Layout};
+        
+        let layout = Layout::from_size_align(size, 8).unwrap_or_else(|_| {
+            panic!("Invalid layout for size {}", size);
+        });
+        
+        unsafe {
+            let ptr = alloc(layout);
+            if ptr.is_null() {
+                panic!("Failed to allocate memory block");
+            }
+            ptr
+        }
+    }
 
     /// Allocate from system
     async fn allocate_from_system(&self, size: usize) -> Result<AllocationResult> {
-        // TODO: Implement system allocation
+        // Implement real system memory allocation
+        use std::alloc::{alloc, Layout};
+        
+        let layout = Layout::from_size_align(size, 8)
+            .map_err(|e| anyhow::anyhow!("Invalid layout: {}", e))?;
+        
+        let ptr = unsafe {
+            let ptr = alloc(layout);
+            if ptr.is_null() {
+                return Err(anyhow::anyhow!("Failed to allocate memory"));
+            }
+            
+            // Initialize memory to zero for security
+            std::ptr::write_bytes(ptr, 0, size);
+            ptr
+        };
+        
         let block_id = Uuid::new_v4().to_string();
         
         Ok(AllocationResult {
-            ptr: std::ptr::null_mut(), // TODO: Implement actual pointer
+            ptr,
             size,
             pool_id: "system".to_string(),
             block_id,
@@ -292,7 +326,18 @@ impl HftMemoryManager {
 
     /// Deallocate from system
     async fn deallocate_from_system(&self, result: &AllocationResult) -> Result<DeallocationResult> {
-        // TODO: Implement system deallocation
+        // Implement real system memory deallocation
+        use std::alloc::{dealloc, Layout};
+        
+        let layout = Layout::from_size_align(result.size, 8)
+            .map_err(|e| anyhow::anyhow!("Invalid layout: {}", e))?;
+        
+        unsafe {
+            // Clear memory for security before deallocation
+            std::ptr::write_bytes(result.ptr, 0, result.size);
+            dealloc(result.ptr, layout);
+        }
+        
         Ok(DeallocationResult {
             success: true,
             pool_id: result.pool_id.clone(),
@@ -378,14 +423,19 @@ impl HftMemoryManager {
 impl HftAllocator {
     /// Allocate memory using the custom allocator
     pub unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // TODO: Implement custom allocation logic
-        System.alloc(layout)
+        // Use system allocator for now
+        // In a real implementation, this would use custom allocation logic
+        std::alloc::alloc(layout)
     }
 
     /// Deallocate memory using the custom allocator
     pub unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // TODO: Implement custom deallocation logic
-        System.dealloc(ptr, layout);
+        // Implement custom deallocation logic
+        // Clear memory for security
+        std::ptr::write_bytes(ptr, 0, layout.size());
+        
+        // Use system deallocator
+        std::alloc::dealloc(ptr, layout);
     }
 }
 

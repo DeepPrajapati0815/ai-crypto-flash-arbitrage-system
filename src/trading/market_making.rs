@@ -3,14 +3,14 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
 use std::str::FromStr;
 use reqwest::Client;
-use crate::core::types::{TradingPair, Order, OrderSide, OrderType, OrderStatus};
+use crate::core::types::{TradingPair, OrderSide};
 
 /// Market making strategy types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -536,7 +536,7 @@ impl MarketMakingManager {
     /// Get mid price for a trading pair from real order book data
     async fn get_mid_price(&self, pair: &TradingPair) -> Result<Decimal> {
         use reqwest::Client;
-        use serde_json::json;
+        
         
         let client = Client::new();
         

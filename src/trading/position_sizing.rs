@@ -3,12 +3,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error, warn};
-use uuid::Uuid;
+use tracing::info;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-use crate::core::types::{TradingPair, OrderSide};
+use crate::core::types::TradingPair;
 
 /// Position sizing strategies
 #[derive(Debug, Clone, Serialize, Deserialize)]

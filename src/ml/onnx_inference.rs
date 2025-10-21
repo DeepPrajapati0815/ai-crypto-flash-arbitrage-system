@@ -3,7 +3,8 @@
 use anyhow::{Result, Context};
 use ort::{Environment, SessionBuilder, Value, GraphOptimizationLevel};
 use ndarray::{Array2, ArrayD, CowArray, IxDyn};
-use tracing::{info, debug};
+use tracing::{info, debug, warn, error};
+use std::time::Duration;
 
 /// ONNX model predictor for arbitrage opportunity scoring
 pub struct ONNXPredictor { 
@@ -56,8 +57,11 @@ impl ONNXPredictor {
         })
     }
     
-    /// Predict probability for a single feature vector
+    /// Predict probability for a single feature vector with retry logic
     pub fn predict(&self, features: &[f32]) -> Result<f32> {
+        const MAX_RETRIES: u32 = 3;
+        const RETRY_DELAY_MS: u64 = 100;
+        
         // Validate input size
         if features.len() != self.input_size {
             return Err(anyhow::anyhow!(
@@ -67,6 +71,38 @@ impl ONNXPredictor {
             ));
         }
         
+        // Attempt prediction with retries
+        for attempt in 1..=MAX_RETRIES {
+            match self.predict_internal(features) {
+                Ok(prediction) => {
+                    if attempt > 1 {
+                        info!("✅ ONNX inference succeeded on attempt {}/{}", attempt, MAX_RETRIES);
+                    }
+                    return Ok(prediction);
+                },
+                Err(e) => {
+                    if attempt < MAX_RETRIES {
+                        warn!(
+                            "⚠️ ONNX inference failed (attempt {}/{}): {}. Retrying in {}ms...", 
+                            attempt, MAX_RETRIES, e, RETRY_DELAY_MS
+                        );
+                        std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+                    } else {
+                        error!(
+                            "❌ ONNX inference failed after {} attempts: {}", 
+                            MAX_RETRIES, e
+                        );
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        
+        Err(anyhow::anyhow!("ONNX inference failed after {} retries", MAX_RETRIES))
+    }
+    
+    /// Internal prediction method without retry logic
+    fn predict_internal(&self, features: &[f32]) -> Result<f32> {
         // Create input tensor [1, input_size] with dynamic dimensions
         let array = Array2::from_shape_vec((1, self.input_size), features.to_vec())?;
         let dyn_array: ArrayD<f32> = array.into_dyn();
@@ -88,12 +124,47 @@ impl ONNXPredictor {
         Ok(prediction)
     }
     
-    /// Predict probabilities for a batch of feature vectors
+    /// Predict probabilities for a batch of feature vectors with retry logic
     pub fn predict_batch(&self, batch: &[Vec<f32>]) -> Result<Vec<f32>> {
+        const MAX_RETRIES: u32 = 3;
+        const RETRY_DELAY_MS: u64 = 100;
+        
         if batch.is_empty() {
             return Ok(Vec::new());
         }
         
+        // Attempt batch prediction with retries
+        for attempt in 1..=MAX_RETRIES {
+            match self.predict_batch_internal(batch) {
+                Ok(predictions) => {
+                    if attempt > 1 {
+                        info!("✅ ONNX batch inference succeeded on attempt {}/{}", attempt, MAX_RETRIES);
+                    }
+                    return Ok(predictions);
+                },
+                Err(e) => {
+                    if attempt < MAX_RETRIES {
+                        warn!(
+                            "⚠️ ONNX batch inference failed (attempt {}/{}): {}. Retrying in {}ms...", 
+                            attempt, MAX_RETRIES, e, RETRY_DELAY_MS
+                        );
+                        std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+                    } else {
+                        error!(
+                            "❌ ONNX batch inference failed after {} attempts: {}", 
+                            MAX_RETRIES, e
+                        );
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        
+        Err(anyhow::anyhow!("ONNX batch inference failed after {} retries", MAX_RETRIES))
+    }
+    
+    /// Internal batch prediction method without retry logic
+    fn predict_batch_internal(&self, batch: &[Vec<f32>]) -> Result<Vec<f32>> {
         let batch_size = batch.len();
         
         // Flatten batch into single array

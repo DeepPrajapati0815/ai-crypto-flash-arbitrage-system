@@ -13,8 +13,3 @@ pub mod model_manager;
 pub mod feature_bridge;
 pub mod onnx_integration;
 
-pub use model_registry::{
-    ModelRegistry, ModelVersion, ModelMetadata, ModelType,
-    TrainingMetrics, ProductionMetrics, DeploymentStatus,
-};
-pub use ab_testing::{ABTestManager, ABTestResult, VariantMetrics, TestRecommendation};

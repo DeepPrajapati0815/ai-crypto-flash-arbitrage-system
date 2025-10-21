@@ -5,8 +5,7 @@ use redis::{Client, Commands, Connection};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, error, debug, warn};
-use std::time::Duration;
+use tracing::{info, error, debug};
 use crate::execution::event_indexer::{FlashArbEvent, TradeReconciliation};
 
 /// Redis cache manager for real-time data
@@ -362,7 +361,7 @@ impl RedisManager {
     pub async fn set_with_ttl(&self, key: &str, value: &str, ttl_seconds: u64) -> Result<()> {
         use redis::AsyncCommands;
         let mut conn = self.connection.lock().await;
-        conn.set_ex(key, value, ttl_seconds)
+        conn.set_ex::<_, _, ()>(key, value, ttl_seconds)
             .map_err(|e| {
                 error!("Failed to set key {} with TTL: {}", key, e);
                 anyhow::anyhow!("Redis error: {}", e)

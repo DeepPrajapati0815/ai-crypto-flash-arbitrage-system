@@ -58,3 +58,19 @@ pub struct RiskEvent {
     pub metadata: serde_json::Value,
     pub timestamp: DateTime<Utc>,
 }
+
+/// PRODUCTION FIX: Dead Letter Queue record for failed orders
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct DeadLetterRecord {
+    pub id: Uuid,
+    pub order_id: String,
+    pub pair: String,
+    pub exchange: String,
+    pub error_message: String,
+    pub error_type: String,
+    pub order_json: String,
+    pub retry_count: i32,
+    pub status: String, // "pending_review", "resolved", "ignored"
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

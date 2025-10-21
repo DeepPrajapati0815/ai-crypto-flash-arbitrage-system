@@ -8,7 +8,7 @@ use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, debug};
+use tracing::info;
 
 /// Market condition assessment
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -3,12 +3,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
-use crate::core::types::{TradingPair, ArbitrageOpportunity};
 
 /// ML prediction model for arbitrage opportunities
 pub struct OpportunityPredictor {

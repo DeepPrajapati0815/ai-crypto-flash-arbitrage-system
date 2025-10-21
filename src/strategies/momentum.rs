@@ -1,9 +1,8 @@
 //! Momentum-based arbitrage strategies
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error, warn};
+use tracing::info;
 use uuid::Uuid;
 use chrono::Utc;
 use rust_decimal::Decimal;
@@ -58,7 +57,7 @@ impl MomentumArbitrage {
 
     /// Add momentum data point
     pub fn add_momentum_point(&mut self, pair: &str, price: Decimal, volume: Decimal) {
-        let mut momentum_data = self.price_momentum
+        let momentum_data = self.price_momentum
             .entry(pair.to_string())
             .or_insert_with(Vec::new);
 

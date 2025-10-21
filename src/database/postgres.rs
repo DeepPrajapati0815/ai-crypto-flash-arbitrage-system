@@ -1,6 +1,6 @@
 //! PostgreSQL database operations
 
-use crate::database::models::{TradeRecord, MarketSnapshot, MetricsRecord, RiskEvent};
+use crate::database::models::{TradeRecord, MarketSnapshot, MetricsRecord, RiskEvent, DeadLetterRecord};
 use crate::database::config::PostgresPoolConfig;
 use crate::execution::event_indexer::{FlashArbEvent, TradeReconciliation, ReconciliationStats};
 use ethers_core::types::H256;
@@ -8,7 +8,7 @@ use anyhow::Result;
 use rust_decimal::Decimal;
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use tracing::{info, warn, error, debug};
-use chrono::{DateTime, Utc, NaiveDate};
+use chrono::{Utc, NaiveDate};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -336,7 +336,45 @@ impl PostgresManager {
             anyhow::anyhow!("Database error: {}", e)
         })?;
         
-        debug!("Successfully stored risk event: {}", event.id);
+        Ok(())
+    }
+    
+    /// PRODUCTION FIX: Store failed order in Dead Letter Queue for manual review
+    pub async fn store_dead_letter(&self, record: &DeadLetterRecord) -> Result<()> {
+        debug!("Storing dead letter record for order: {}", record.order_id);
+        
+        sqlx::query(
+            r#"
+            INSERT INTO dead_letter_queue 
+            (id, order_id, pair, exchange, error_message, error_type, order_json, 
+             retry_count, status, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (order_id) 
+            DO UPDATE SET 
+                retry_count = dead_letter_queue.retry_count + 1,
+                updated_at = $11,
+                error_message = $5
+            "#
+        )
+        .bind(&record.id)
+        .bind(&record.order_id)
+        .bind(&record.pair)
+        .bind(&record.exchange)
+        .bind(&record.error_message)
+        .bind(&record.error_type)
+        .bind(&record.order_json)
+        .bind(&record.retry_count)
+        .bind(&record.status)
+        .bind(&record.created_at)
+        .bind(&record.updated_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            error!("Failed to store dead letter record: {}", e);
+            anyhow::anyhow!("Database error: {}", e)
+        })?;
+        
+        info!("Stored dead letter record for order {} in database", record.order_id);
         Ok(())
     }
 

@@ -5,7 +5,6 @@
 
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{info, error};
 use tracing_subscriber;
 
