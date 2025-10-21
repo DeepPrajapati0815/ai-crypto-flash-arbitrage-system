@@ -5,7 +5,7 @@
 use crate::core::types::{ArbitrageOpportunity, Decimal};
 use crate::execution::route_builder::RouteBuilder;
 use crate::execution::evm_tx::FlashArbTxBuilder;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, Context}; // ✅ ISSUE #11 FIX: Add Context for with_context
 use ethers_signers::{LocalWallet, Signer};
 use ethers_core::types::{TransactionRequest, U256, Address, Bytes};
 use ethers_core::types::transaction::eip2718::TypedTransaction;
@@ -21,6 +21,25 @@ pub struct TokenResolver {
 }
 
 impl TokenResolver {
+    /// ✅ ISSUE #11 FIX: Create token resolver from config (supports multi-chain)
+    pub fn from_config(token_addresses: std::collections::HashMap<String, String>) -> Result<Self> {
+        let mut addresses = std::collections::HashMap::new();
+        
+        for (symbol, address_str) in token_addresses {
+            let address = Address::from_str(&address_str)
+                .with_context(|| format!("Invalid address '{}' for token '{}'", address_str, symbol))?;
+            addresses.insert(symbol, address);
+        }
+        
+        tracing::info!("✅ TokenResolver initialized with {} tokens", addresses.len());
+        for (symbol, addr) in &addresses {
+            tracing::debug!("  {} -> {:?}", symbol, addr);
+        }
+        
+        Ok(Self { addresses })
+    }
+    
+    /// Create new token resolver with default mainnet addresses (backward compatibility)
     pub fn new() -> Self {
         let mut addresses = std::collections::HashMap::new();
         
@@ -35,6 +54,8 @@ impl TokenResolver {
             Address::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap());
         addresses.insert("WBTC".to_string(), 
             Address::from_str("0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599").unwrap());
+        
+        tracing::warn!("⚠️ Using default mainnet token addresses. Consider using from_config() for production.");
         
         Self { addresses }
     }
@@ -54,16 +75,32 @@ impl TokenResolver {
     }
 }
 
-/// Convert Decimal to U256 with specified decimals
+/// ✅ ISSUE #12 FIX: Convert Decimal to U256 without precision loss
+/// 
+/// Previous implementation used f64 intermediary which loses precision for large amounts.
+/// This version uses Decimal math directly to maintain full precision.
 pub fn decimal_to_u256(amount: Decimal, decimals: u8) -> Result<U256> {
-    // Convert to string with proper precision
-    let amount_f64 = amount.to_string().parse::<f64>()?;
+    use rust_decimal::prelude::ToPrimitive;
     
-    // Scale by decimals (e.g., 1 USDT = 1e6 for 6 decimals)
-    let scaled = amount_f64 * 10f64.powi(decimals as i32);
+    // ✅ Scale using Decimal arithmetic (no f64 precision loss)
+    let scale_factor = Decimal::from(10u64.pow(decimals as u32));
+    let scaled = amount.checked_mul(scale_factor)
+        .ok_or_else(|| anyhow!("Decimal overflow when scaling to {} decimals", decimals))?;
     
-    // Convert to U256
-    let u256_val = U256::from(scaled as u128);
+    // ✅ Ensure non-negative (U256 cannot represent negative values)
+    if scaled < Decimal::ZERO {
+        return Err(anyhow!("Cannot convert negative amount {} to U256", amount));
+    }
+    
+    // ✅ Extract mantissa as integer (preserves all digits)
+    let mantissa = scaled.mantissa();
+    if mantissa < 0 {
+        return Err(anyhow!("Negative mantissa {} after scaling", mantissa));
+    }
+    
+    // ✅ Convert to U256 safely
+    // Mantissa is i128, but we've verified it's positive
+    let u256_val = U256::from(mantissa as u128);
     
     Ok(u256_val)
 }

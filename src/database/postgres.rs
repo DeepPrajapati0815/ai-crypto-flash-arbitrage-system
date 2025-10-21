@@ -410,8 +410,24 @@ impl PostgresManager {
                 buy_price: Decimal::from_str(&row.get::<String, _>("buy_price")).unwrap_or(Decimal::ZERO),
                 sell_price: Decimal::from_str(&row.get::<String, _>("sell_price")).unwrap_or(Decimal::ZERO),
                 quantity: Decimal::from_str(&row.get::<String, _>("quantity")).unwrap_or(Decimal::ZERO),
+                // ✅ P&L RECONCILIATION: Try to get actual prices if available
+                actual_buy_price: row.try_get::<String, _>("actual_buy_price")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
+                actual_sell_price: row.try_get::<String, _>("actual_sell_price")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
+                actual_quantity: row.try_get::<String, _>("actual_quantity")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
                 profit_amount: Decimal::from_str(&row.get::<String, _>("profit_amount")).unwrap_or(Decimal::ZERO),
+                expected_profit: row.try_get::<String, _>("expected_profit")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
                 profit_percentage: Decimal::from_str(&row.get::<String, _>("profit_percentage")).unwrap_or(Decimal::ZERO),
+                slippage_percentage: row.try_get::<String, _>("slippage_percentage")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
                 buy_order_id: row.get("buy_order_id"),
                 sell_order_id: row.get("sell_order_id"),
                 status: row.get("status"),
@@ -764,8 +780,24 @@ impl PostgresManager {
                 buy_price: Decimal::from_str(&row.get::<String, _>("buy_price"))?,
                 sell_price: Decimal::from_str(&row.get::<String, _>("sell_price"))?,
                 quantity: Decimal::from_str(&row.get::<String, _>("quantity"))?,
+                // ✅ P&L RECONCILIATION: Try to get actual prices if available
+                actual_buy_price: row.try_get::<String, _>("actual_buy_price")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
+                actual_sell_price: row.try_get::<String, _>("actual_sell_price")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
+                actual_quantity: row.try_get::<String, _>("actual_quantity")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
                 profit_amount: Decimal::from_str(&row.get::<String, _>("profit_amount"))?,
+                expected_profit: row.try_get::<String, _>("expected_profit")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
                 profit_percentage: Decimal::from_str(&row.get::<String, _>("profit_percentage"))?,
+                slippage_percentage: row.try_get::<String, _>("slippage_percentage")
+                    .ok()
+                    .and_then(|s| Decimal::from_str(&s).ok()),
                 buy_order_id: row.get("buy_order_id"),
                 sell_order_id: row.get("sell_order_id"),
                 status: row.get("status"),

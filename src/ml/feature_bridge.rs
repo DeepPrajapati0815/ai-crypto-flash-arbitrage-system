@@ -8,7 +8,7 @@ use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc, Timelike, Datelike};
+use chrono::{DateTime, Utc, Timelike, Datelike, Timelike as _};
 
 /// Cached feature computation result
 #[derive(Clone)]
@@ -79,13 +79,83 @@ pub struct FeatureBridge {
 
 impl FeatureBridge {
     pub fn new(orderbook_manager: Arc<RwLock<OrderBookManager>>) -> Self {
+        let feature_cache: Arc<RwLock<HashMap<String, FeatureCache>>> = Arc::new(RwLock::new(HashMap::new()));
+        let price_history: Arc<RwLock<HashMap<String, MarketDataHistory>>> = Arc::new(RwLock::new(HashMap::new()));
+        let cache_ttl_seconds = 1;
+        
+        // ✅ ISSUE #3 FIX: Spawn periodic cache cleanup task to prevent memory leak
+        let cache_clone = feature_cache.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30)); // Every 30s
+            let cache_ttl = cache_ttl_seconds;
+            
+            tracing::info!("🧹 FeatureBridge cache cleanup task started ({}s TTL)", cache_ttl);
+            
+            loop {
+                interval.tick().await;
+                
+                let mut cache = cache_clone.write().await;
+                let now = Utc::now();
+                let initial_size = cache.len();
+                
+                // ✅ REAL PRODUCTION LOGIC: Remove all expired entries (older than TTL)
+                cache.retain(|_key, v| {
+                    now.signed_duration_since(v.computed_at).num_seconds() < cache_ttl
+                });
+                
+                let removed = initial_size - cache.len();
+                let remaining = cache.len();
+                
+                if removed > 0 {
+                    tracing::debug!(
+                        "🧹 Cache cleanup: removed {} expired entries, {} remaining (freed ~{}KB)",
+                        removed,
+                        remaining,
+                        (removed * 200) / 1024  // ~200 bytes per feature vector (50 floats)
+                    );
+                }
+                
+                // ✅ PRODUCTION SAFETY: If cache still too large, force eviction of oldest entries
+                if remaining > 1000 {
+                    let to_remove = remaining - 1000;
+                    
+                    // Collect keys sorted by age
+                    let mut entries: Vec<_> = cache.iter()
+                        .map(|(k, v)| (k.clone(), v.computed_at))
+                        .collect();
+                    entries.sort_by_key(|(_, ts)| *ts);
+                    
+                    // Remove oldest entries
+                    for (key, _) in entries.iter().take(to_remove) {
+                        cache.remove(key);
+                    }
+                    
+                    tracing::warn!(
+                        "⚠️ Cache overflow: force-evicted {} oldest entries (cache was {} entries)",
+                        to_remove,
+                        remaining
+                    );
+                }
+                
+                // Memory usage stats (approximate)
+                let memory_kb = (cache.len() * 200) / 1024;
+                if memory_kb > 1024 {
+                    tracing::warn!(
+                        "⚠️ High cache memory usage: ~{}KB ({} entries)",
+                        memory_kb,
+                        cache.len()
+                    );
+                }
+            }
+        });
+        
         Self { 
             orderbook_manager,
-            feature_cache: Arc::new(RwLock::new(HashMap::new())),
-            price_history: Arc::new(RwLock::new(HashMap::new())), // PRODUCTION FIX
-            max_cache_size: 1000,  // Cache up to 1000 computations
-            cache_ttl_seconds: 1,   // 1 second TTL (features change quickly in HFT)
-            max_history_length: 100, // Store last 100 data points per pair (~100 seconds in HFT)
+            feature_cache,
+            price_history,
+            max_cache_size: 1000,
+            cache_ttl_seconds,
+            max_history_length: 100,
         }
     }
     
@@ -228,7 +298,7 @@ impl FeatureBridge {
         {
             let cache = self.feature_cache.read().await;
             if let Some(cached) = cache.get(&opportunity.id) {
-                let age = (Utc::now() - cached.computed_at).num_seconds();
+                let age = Utc::now().signed_duration_since(cached.computed_at).num_seconds();
                 if age < self.cache_ttl_seconds {
                     return Ok(cached.features.clone());
                 }
@@ -585,7 +655,7 @@ impl FeatureBridge {
         let now = Utc::now();
         
         cache.retain(|_, v| {
-            (now - v.computed_at).num_seconds() < self.cache_ttl_seconds
+            now.signed_duration_since(v.computed_at).num_seconds() < self.cache_ttl_seconds
         });
     }
     
@@ -775,7 +845,7 @@ mod tests {
             return 0.0;
         }
         
-        let time_span = trades.last().unwrap().timestamp - trades.first().unwrap().timestamp;
+        let time_span = trades.last().unwrap().timestamp.signed_duration_since(trades.first().unwrap().timestamp);
         if time_span.num_seconds() == 0 {
             return 0.0;
         }
@@ -1089,7 +1159,7 @@ fn calculate_trade_frequency_simple(trades: &[Trade]) -> f64 {
         return 0.0;
     }
     
-    let time_span = trades.last().unwrap().timestamp - trades.first().unwrap().timestamp;
+    let time_span = trades.last().unwrap().timestamp.signed_duration_since(trades.first().unwrap().timestamp);
     if time_span.num_seconds() == 0 {
         return 0.0;
     }

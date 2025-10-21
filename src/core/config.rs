@@ -70,6 +70,23 @@ pub struct EvmConfig {
     pub weth: String,
     pub usdc: String,
     pub usdt: String,
+    // ✅ ISSUE #11 FIX: Configurable token addresses for multi-chain support
+    #[serde(default = "default_token_addresses")]
+    pub token_addresses: HashMap<String, String>,
+}
+
+/// ✅ ISSUE #11 FIX: Default token addresses for Ethereum mainnet
+fn default_token_addresses() -> HashMap<String, String> {
+    let mut addresses = HashMap::new();
+    
+    // Ethereum Mainnet addresses (chain_id: 1)
+    addresses.insert("WETH".to_string(), "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string());
+    addresses.insert("USDT".to_string(), "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string());
+    addresses.insert("USDC".to_string(), "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string());
+    addresses.insert("DAI".to_string(), "0x6B175474E89094C44Da98b954EedeAC495271d0F".to_string());
+    addresses.insert("WBTC".to_string(), "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599".to_string());
+    
+    addresses
 }
 
 /// MEV/Flashbots configuration
@@ -194,6 +211,8 @@ impl Config {
             weth: env::var("WETH_ADDRESS").unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
             usdc: env::var("USDC_ADDRESS").unwrap_or_else(|_| "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()),
             usdt: env::var("USDT_ADDRESS").unwrap_or_else(|_| "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string()),
+            // ✅ ISSUE #11 FIX: Use default token addresses function
+            token_addresses: default_token_addresses(),
         };
 
         // MEV configuration

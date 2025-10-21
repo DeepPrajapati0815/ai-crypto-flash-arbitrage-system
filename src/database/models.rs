@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-/// Trade record for database storage
+/// ✅ AUDIT P&L RECONCILIATION FIX: Trade record with realized vs expected profit tracking
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TradeRecord {
     pub id: Uuid,
@@ -13,11 +13,25 @@ pub struct TradeRecord {
     pub pair: String,
     pub buy_exchange: String,
     pub sell_exchange: String,
+    // Original prices (expected)
     pub buy_price: Decimal,
     pub sell_price: Decimal,
     pub quantity: Decimal,
-    pub profit_amount: Decimal,
+    // ✅ NEW: Actual execution prices (realized)
+    #[sqlx(default)]
+    pub actual_buy_price: Option<Decimal>,
+    #[sqlx(default)]
+    pub actual_sell_price: Option<Decimal>,
+    #[sqlx(default)]
+    pub actual_quantity: Option<Decimal>,
+    // ✅ NEW: Profit tracking (realized vs expected)
+    pub profit_amount: Decimal,  // Realized profit (actual)
+    #[sqlx(default)]
+    pub expected_profit: Option<Decimal>,  // Expected profit (from opportunity)
     pub profit_percentage: Decimal,
+    #[sqlx(default)]
+    pub slippage_percentage: Option<Decimal>,  // (realized - expected) / expected
+    // Order tracking
     pub buy_order_id: String,
     pub sell_order_id: String,
     pub status: String,
