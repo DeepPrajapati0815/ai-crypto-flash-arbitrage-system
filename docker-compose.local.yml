@@ -1,0 +1,188 @@
+# =============================================================================
+# Docker Compose - LOCAL TESTING (With ML Training)
+# =============================================================================
+# Use this for local testing WITH ML training but WITHOUT monitoring
+# 
+# Includes:
+#   - PostgreSQL (Database)
+#   - Redis (Cache)
+#   - ML Training (Python/ONNX)
+#   - HFT Bot (Rust)
+#
+# Excludes:
+#   - Prometheus
+#   - Grafana
+# 
+# Usage:
+#   docker compose -f docker-compose.local.yml up -d --build
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # PostgreSQL Database
+  # ===========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: hft-postgres-local
+    restart: unless-stopped
+    
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-hft_bot}
+      - POSTGRES_USER=${POSTGRES_USER:-hftbot}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-test123}
+    
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hftbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+    networks:
+      - hft-network
+
+  # ===========================================================================
+  # Redis Cache
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: hft-redis-local
+    restart: unless-stopped
+    
+    command: redis-server --appendonly yes --maxmemory 2gb
+    
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    
+    volumes:
+      - redis_data:/data
+    
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    
+    networks:
+      - hft-network
+
+  # ===========================================================================
+  # ML Training Service (Trains models, exports to ONNX)
+  # ===========================================================================
+  ml-trainer:
+    build:
+      context: ./ml_training
+      dockerfile: Dockerfile
+    container_name: hft-ml-trainer-local
+    
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD:-test123}@postgres:5432/${POSTGRES_DB:-hft_bot}
+      - REDIS_URL=redis://redis:6379
+      - PYTHONUNBUFFERED=1
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    
+    volumes:
+      - ./ml_training/models:/ml/models
+      - ./ml_training/data:/ml/data
+      - ./ml_training/scripts:/ml/scripts
+    
+    command: >
+      sh -c "
+        echo '🤖 Training ML models...' &&
+        python scripts/train_xgboost_model.py &&
+        echo '✅ ML model training complete!' &&
+        echo '📦 ONNX model saved to: ml_training/models/trading_model.onnx'
+      "
+    
+    networks:
+      - hft-network
+
+  # ===========================================================================
+  # HFT Arbitrage Bot - Main Application
+  # ===========================================================================
+  hft-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hft-arbitrage-bot-local
+    restart: unless-stopped
+    
+    environment:
+      # App config
+      - RUST_LOG=${RUST_LOG:-info}
+      - RUST_BACKTRACE=1
+      
+      # Database connections
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hft_bot}
+      - REDIS_URL=redis://redis:6379
+      
+      # Monitoring
+      - METRICS_PORT=${METRICS_PORT:-8080}
+      - LOG_LEVEL=${RUST_LOG:-info}
+      - ENABLE_TRACING=true
+      
+      # Performance
+      - MAX_CONCURRENT_ORDERS=${MAX_CONCURRENT_ORDERS:-100}
+      - LATENCY_TARGET_US=${LATENCY_TARGET_US:-1000}
+      
+      # Exchange APIs (optional)
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
+      - BINANCE_SECRET_KEY=${BINANCE_SECRET_KEY:-}
+      - OKX_API_KEY=${OKX_API_KEY:-}
+      - OKX_SECRET_KEY=${OKX_SECRET_KEY:-}
+      - OKX_PASSPHRASE=${OKX_PASSPHRASE:-}
+      
+      # Blockchain (optional)
+      - EVM_RPC_URL=${EVM_RPC_URL:-https://eth.llamarpc.com}
+      - EVM_CHAIN_ID=${EVM_CHAIN_ID:-1}
+      - EVM_PRIVATE_KEY=${EVM_PRIVATE_KEY:-}
+      - FLASH_ARB_ADDRESS=${FLASH_ARB_ADDRESS:-}
+      
+      # MEV (optional)
+      - USE_MEV_FIRST=${USE_MEV_FIRST:-false}
+      - FLASHBOTS_SIGNING_KEY=${FLASHBOTS_SIGNING_KEY:-}
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ml-trainer:
+        condition: service_completed_successfully
+    
+    ports:
+      - "${METRICS_PORT:-8080}:8080"
+    
+    volumes:
+      - ./logs:/app/logs
+      - ./ml_training/models:/app/ml_training/models:ro
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    networks:
+      - hft-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  hft-network:
+    driver: bridge
+

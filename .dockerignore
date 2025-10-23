@@ -241,6 +241,7 @@ coverage/
 # ============================================
 # Keep essential config files
 !Cargo.toml
+!Cargo.lock
 !rust-toolchain
 !rust-toolchain.toml
 

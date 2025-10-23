@@ -1,21 +1,95 @@
+# =============================================================================
+# Prometheus Configuration for HFT Arbitrage System
+# =============================================================================
+
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  scrape_timeout: 10s
   external_labels:
-    monitor: 'flash-arb-monitor'
+    cluster: 'hft-arbitrage'
+    environment: 'production'
 
+# Alerting configuration (optional - configure Alertmanager if needed)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Load rules for alerting
+# rule_files:
+#   - "alert_rules.yml"
+
+# Scrape configurations
 scrape_configs:
+  # ======================================================================
+  # Prometheus self-monitoring
+  # ======================================================================
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+          tier: 'monitoring'
 
-  - job_name: 'flash-arb-bot'
-    static_configs:
-      - targets: ['flash-arb-bot:9091']
-    scrape_interval: 5s
+  # ======================================================================
+  # HFT Arbitrage Bot - Main Application Metrics
+  # ======================================================================
+  - job_name: 'hft-arbitrage-bot'
+    scrape_interval: 5s  # More frequent scraping for trading metrics
+    scrape_timeout: 3s
     metrics_path: '/metrics'
-
-  - job_name: 'node-exporter'
+    
     static_configs:
-      - targets: ['node-exporter:9100']
+      - targets: ['hft-bot:8080']
+        labels:
+          service: 'hft-bot'
+          tier: 'application'
+          component: 'trading-engine'
+    
+    # Relabeling for better metric organization
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'hft-bot'
 
+  # ======================================================================
+  # PostgreSQL Database Metrics (if postgres_exporter is added)
+  # ======================================================================
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+  #       labels:
+  #         service: 'postgres'
+  #         tier: 'database'
+
+  # ======================================================================
+  # Redis Metrics (if redis_exporter is added)
+  # ======================================================================
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+  #       labels:
+  #         service: 'redis'
+  #         tier: 'cache'
+
+  # ======================================================================
+  # Node Exporter - System Metrics (if added)
+  # ======================================================================
+  # - job_name: 'node-exporter'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
+  #       labels:
+  #         service: 'node-exporter'
+  #         tier: 'infrastructure'
+
+  # ======================================================================
+  # cAdvisor - Container Metrics (if added)
+  # ======================================================================
+  # - job_name: 'cadvisor'
+  #   static_configs:
+  #     - targets: ['cadvisor:8080']
+  #       labels:
+  #         service: 'cadvisor'
+  #         tier: 'monitoring'

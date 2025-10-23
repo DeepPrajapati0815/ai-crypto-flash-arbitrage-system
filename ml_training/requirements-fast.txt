@@ -1,0 +1,24 @@
+# ML ONNX Training Pipeline Dependencies
+# OPTIMIZED FOR FAST INSTALLATION - Minimal versions
+
+# Core ML Libraries - Essential only
+scikit-learn==1.3.2
+xgboost==2.0.3
+
+# Data Processing
+pandas==2.1.3
+numpy==1.26.2
+
+# ONNX Export & Runtime
+onnx==1.15.0
+onnxruntime==1.16.3
+skl2onnx==1.16.0
+onnxmltools>=1.11.0
+onnxconverter-common>=1.13.0
+
+# Database connector
+psycopg2-binary>=2.9.0
+
+# Utilities
+python-dotenv==1.0.0
+
