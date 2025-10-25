@@ -10,15 +10,22 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, classification_report
-import onnxruntime as ort
-from skl2onnx import convert_sklearn
-from skl2onnx.common.data_types import FloatTensorType
+# ONNX imports - make optional to handle compatibility issues
+try:
+    import onnxruntime as ort
+    from skl2onnx import convert_sklearn
+    from skl2onnx.common.data_types import FloatTensorType
+    ONNX_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: ONNX not available: {e}")
+    ONNX_AVAILABLE = False
 from pathlib import Path
 import json
 from datetime import datetime
 import pickle
 import argparse
 import time
+import os
 
 
 def load_real_market_data_from_csv(csv_path, min_samples=1000):
@@ -300,10 +307,16 @@ def export_xgboost_to_onnx(model, output_path, input_size=50):
     This function now properly exports XGBoost models to ONNX format that can be
     loaded by the Rust ONNX Runtime inference engine.
     """
+    if not ONNX_AVAILABLE:
+        print(f"\n⚠️ ONNX not available, falling back to JSON export...")
+        model_json_path = output_path.replace('.onnx', '.json')
+        model.save_model(model_json_path)
+        print(f"   Model saved as JSON to {model_json_path}")
+        return model_json_path
+    
     try:
         import onnxmltools
         from onnxconverter_common import FloatTensorType
-        import onnxruntime as ort
         
         print(f"\n✅ ISSUE #8 FIX: Exporting XGBoost to ONNX...")
         
@@ -331,7 +344,7 @@ def export_xgboost_to_onnx(model, output_path, input_size=50):
         
         return output_path
         
-    except ImportError as e:
+    except Exception as e:
         print(f"\n❌ ERROR: {e}")
         print("📦 Install: pip install onnxmltools onnxconverter-common")
         print("\n⚠️ Falling back to JSON export...")
@@ -493,8 +506,14 @@ def main():
     print("\n5. Exporting model...")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    model_path = output_dir / "xgboost_model.json"
-    model.save_model(str(model_path))
+    
+    # Try ONNX export first, fall back to JSON
+    onnx_path = output_dir / "trading_model.onnx"
+    model_path = export_xgboost_to_onnx(model, str(onnx_path))
+    
+    # Also save as JSON for backup
+    json_path = output_dir / "xgboost_model.json"
+    model.save_model(str(json_path))
     
     # Test
     print("\n6. Testing...")

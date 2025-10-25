@@ -25,7 +25,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy manifest files first for dependency caching
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock* ./
+
 
 # Create dummy main.rs to cache dependencies
 # Using cargo +nightly for edition2024 support
@@ -59,9 +60,17 @@ RUN apt-get update && apt-get install -y \
     curl \
     # ONNX Runtime dependencies
     libgomp1 \
+    # ONNX Runtime library
+    wget \
     # Cleanup
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+# Install ONNX Runtime
+RUN wget https://github.com/microsoft/onnxruntime/releases/download/v1.16.0/onnxruntime-linux-x64-1.16.0.tgz \
+    && tar -xzf onnxruntime-linux-x64-1.16.0.tgz \
+    && cp onnxruntime-linux-x64-1.16.0/lib/libonnxruntime.so.1.16.0 /usr/lib/ \
+    && rm -rf onnxruntime-linux-x64-1.16.0*
 
 # Create non-root user for security
 RUN groupadd -r hftbot -g 1000 && \
