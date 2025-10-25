@@ -591,7 +591,12 @@ impl MEVSubmissionManager {
         };
         let value = tx_request.value.unwrap_or(U256::zero());
         let data = tx_request.data.clone().unwrap_or_default();
-        let gas_limit = tx_request.gas.unwrap_or(U256::from(1000000));
+        let gas_limit = tx_request.gas.unwrap_or(U256::from(
+            std::env::var("DEFAULT_GAS_LIMIT")
+                .unwrap_or_else(|_| "1000000".to_string())
+                .parse()
+                .unwrap_or(1000000)
+        ));
         
         // Build flash loan transaction
         let flash_loan_tx = self.build_flash_loan_transaction(&to_address, &value, &data, &gas_limit).await?;
@@ -717,7 +722,12 @@ impl MEVSubmissionManager {
         let function_selector = [0x57, 0x3a, 0xde, 0x81]; // repay(address,uint256,uint256,address)
         
         // Calculate repayment amount (principal + fee)
-        let fee_rate = U256::from(9); // 0.09% fee
+        let fee_rate = U256::from(
+            std::env::var("MEV_FEE_RATE")
+                .unwrap_or_else(|_| "9".to_string())
+                .parse()
+                .unwrap_or(9)
+        ); // 0.09% fee
         let fee = (*value * fee_rate) / U256::from(10000);
         let repay_amount = *value + fee;
         
@@ -744,11 +754,18 @@ impl MEVSubmissionManager {
         // This is a simplified parser - in reality, you'd need to decode the actual ABI
         // For now, return default parameters based on common arbitrage patterns
         Ok(SwapParameters {
-            token_in: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")?, // WETH
-            token_out: Address::from_str("0xA0b86a33E6441b8C4C8C0C1234567890AbCdEf12")?, // USDC
+            token_in: Address::from_str(&std::env::var("WETH_ADDRESS")
+                .unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()))?, // WETH
+            token_out: Address::from_str(&std::env::var("USDC_ADDRESS")
+                .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string()))?, // USDC
             fee: 3000, // 0.3% fee tier
             deadline: chrono::Utc::now().timestamp() as u64 + 1800, // 30 minutes
-            amount_out_minimum: U256::from(1000000), // 1 USDC minimum
+            amount_out_minimum: U256::from(
+                std::env::var("MIN_AMOUNT_OUT")
+                    .unwrap_or_else(|_| "1000000".to_string())
+                    .parse()
+                    .unwrap_or(1000000)
+            ), // 1 USDC minimum
         })
     }
     
@@ -759,7 +776,12 @@ impl MEVSubmissionManager {
         // For now, return a calculated profit based on gas costs and market conditions
         
         let gas_price = self.get_current_gas_prices().await?.1;
-        let gas_cost = gas_price * U256::from(500000); // Estimated gas usage
+        let gas_cost = gas_price * U256::from(
+            std::env::var("ESTIMATED_GAS_USAGE")
+                .unwrap_or_else(|_| "500000".to_string())
+                .parse()
+                .unwrap_or(500000)
+        ); // Estimated gas usage
         let gas_cost_eth = rust_decimal::Decimal::from(gas_cost.as_u64()) / rust_decimal::Decimal::from(1_000_000_000_000_000_000u64);
         
         // Assume 0.1% profit margin (this would be calculated from actual market data)
@@ -804,7 +826,9 @@ impl MEVSubmissionManager {
         use reqwest::Client;
         
         let client = Client::new();
-        let response = client.get("https://api.ethgasstation.info/api/ethgasAPI.json").send().await?;
+        let url = std::env::var("ETH_GAS_STATION_URL")
+            .unwrap_or_else(|_| "https://api.ethgasstation.info/api/ethgasAPI.json".to_string());
+        let response = client.get(&url).send().await?;
         let data: serde_json::Value = response.json().await?;
         
         if let (Some(fast), Some(standard)) = (data["fast"].as_f64(), data["safeLow"].as_f64()) {
@@ -821,7 +845,11 @@ impl MEVSubmissionManager {
         use reqwest::Client;
         
         let client = Client::new();
-        let url = "https://api.etherscan.io/api?module=gastracker&action=gasoracle&apikey=YourApiKey";
+        let base_url = std::env::var("ETHERSCAN_API_URL")
+            .unwrap_or_else(|_| "https://api.etherscan.io/api".to_string());
+        let api_key = std::env::var("ETHERSCAN_API_KEY")
+            .unwrap_or_else(|_| "YourApiKey".to_string());
+        let url = format!("{}?module=gastracker&action=gasoracle&apikey={}", base_url, api_key);
         let response = client.get(url).send().await?;
         let data: serde_json::Value = response.json().await?;
         
@@ -849,7 +877,9 @@ impl MEVSubmissionManager {
             "id": 1
         });
         
-        let response = client.post("https://eth-mainnet.g.alchemy.com/v2/your-api-key")
+        let alchemy_url = std::env::var("ALCHEMY_RPC_URL")
+            .unwrap_or_else(|_| "https://eth-mainnet.g.alchemy.com/v2/your-api-key".to_string());
+        let response = client.post(&alchemy_url)
             .json(&request)
             .send().await?;
         let data: serde_json::Value = response.json().await?;

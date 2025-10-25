@@ -43,17 +43,22 @@ impl TokenResolver {
     pub fn new() -> Self {
         let mut addresses = std::collections::HashMap::new();
         
-        // Default mainnet addresses (replace with actual addresses for your chain)
+        // Get addresses from environment variables with fallbacks
         addresses.insert("WETH".to_string(), 
-            Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap());
+            Address::from_str(&std::env::var("WETH_ADDRESS")
+                .unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string())).unwrap());
         addresses.insert("USDT".to_string(), 
-            Address::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7").unwrap());
+            Address::from_str(&std::env::var("USDT_ADDRESS")
+                .unwrap_or_else(|_| "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string())).unwrap());
         addresses.insert("USDC".to_string(), 
-            Address::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap());
+            Address::from_str(&std::env::var("USDC_ADDRESS")
+                .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string())).unwrap());
         addresses.insert("DAI".to_string(), 
-            Address::from_str("0x6B175474E89094C44Da98b954EedeAC495271d0F").unwrap());
+            Address::from_str(&std::env::var("DAI_ADDRESS")
+                .unwrap_or_else(|_| "0x6B175474E89094C44Da98b954EedeAC495271d0F".to_string())).unwrap());
         addresses.insert("WBTC".to_string(), 
-            Address::from_str("0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599").unwrap());
+            Address::from_str(&std::env::var("WBTC_ADDRESS")
+                .unwrap_or_else(|_| "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599".to_string())).unwrap());
         
         tracing::warn!("⚠️ Using default mainnet token addresses. Consider using from_config() for production.");
         
@@ -149,7 +154,10 @@ where
     
     // 4. Build EVM transaction with gas estimation
     // Use new_http constructor which doesn't require async
-    let rpc_url = std::env::var("EVM_RPC_URL").unwrap_or_else(|_| "http://localhost:8545".to_string());
+    let rpc_url = std::env::var("EVM_RPC_URL").unwrap_or_else(|_| {
+        let port = std::env::var("EVM_RPC_PORT").unwrap_or_else(|_| "8545".to_string());
+        format!("http://localhost:{}", port)
+    });
     let tx_builder = FlashArbTxBuilder::new_http(&rpc_url, contract_address)?;
     let mut tx = tx_builder.build_call(
         asset_address,
@@ -259,7 +267,10 @@ where
         transactions: vec![signed_tx_hex], // ✅ REAL SIGNED TRANSACTION!
         block_number: Some(current_block + 1), // Target next block
         min_timestamp: Some(opportunity.timestamp.timestamp() as u64),
-        max_timestamp: Some((opportunity.timestamp + chrono::Duration::seconds(30)).timestamp() as u64),
+        max_timestamp: Some((opportunity.timestamp + chrono::Duration::seconds(
+            std::env::var("MEV_TIMEOUT_SECONDS")
+                .unwrap_or_else(|_| "30".to_string()).parse().unwrap_or(30)
+        )).timestamp() as u64),
         reverting_tx_hashes: vec![],
         replacement_uid: None,
         refund_recipient: Some(format!("{:?}", wallet.address())),

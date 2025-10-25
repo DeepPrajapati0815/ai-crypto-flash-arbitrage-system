@@ -32,8 +32,8 @@ Write-Host ""
 if (-not (Test-Path .env)) {
     Write-Host "📝 Creating .env file from template..." -ForegroundColor Yellow
     
-    if (Test-Path .env.template) {
-        Copy-Item .env.template .env
+    if (Test-Path env.example) {
+        Copy-Item env.example .env
         Write-Host "✅ .env file created!" -ForegroundColor Green
         Write-Host ""
         Write-Host "⚠️  IMPORTANT: Edit .env file and set your passwords:" -ForegroundColor Yellow
@@ -47,12 +47,13 @@ if (-not (Test-Path .env)) {
         Write-Host "Press Enter after you've saved .env, or Ctrl+C to exit..." -ForegroundColor Yellow
         Read-Host
     } else {
-        Write-Host "❌ .env.template not found!" -ForegroundColor Red
+        Write-Host "❌ env.example not found!" -ForegroundColor Red
         exit 1
     }
 } else {
     Write-Host "✅ .env file already exists" -ForegroundColor Green
 }
+
 
 # Check if critical passwords are set
 $envContent = Get-Content .env -Raw

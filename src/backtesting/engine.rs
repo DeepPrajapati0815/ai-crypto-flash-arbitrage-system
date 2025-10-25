@@ -410,9 +410,21 @@ impl BacktestEngine {
     /// Get order book depth from exchange
     async fn get_order_book_depth(&self, client: &Client, exchange: &str, pair: &str) -> Result<OrderBookDepth> {
         let url = match exchange {
-            "binance" => format!("https://api.binance.com/api/v3/depth?symbol={}&limit=100", pair),
-            "okx" => format!("https://www.okx.com/api/v5/market/books?instId={}&sz=100", pair),
-            "kraken" => format!("https://api.kraken.com/0/public/Depth?pair={}&count=100", pair),
+            "binance" => {
+                let base_url = std::env::var("BINANCE_API_URL")
+                    .unwrap_or_else(|_| "https://api.binance.com/api/v3".to_string());
+                format!("{}/depth?symbol={}&limit=100", base_url, pair)
+            },
+            "okx" => {
+                let base_url = std::env::var("OKX_API_URL")
+                    .unwrap_or_else(|_| "https://www.okx.com/api/v5".to_string());
+                format!("{}/market/books?instId={}&sz=100", base_url, pair)
+            },
+            "kraken" => {
+                let base_url = std::env::var("KRAKEN_API_URL")
+                    .unwrap_or_else(|_| "https://api.kraken.com/0/public".to_string());
+                format!("{}/Depth?pair={}&count=100", base_url, pair)
+            },
             _ => return Err(anyhow::anyhow!("Unsupported exchange: {}", exchange)),
         };
         
@@ -477,9 +489,21 @@ impl BacktestEngine {
         
         // Ping exchange API
         let url = match exchange {
-            "binance" => "https://api.binance.com/api/v3/ping",
-            "okx" => "https://www.okx.com/api/v5/public/time",
-            "kraken" => "https://api.kraken.com/0/public/Time",
+            "binance" => {
+                let base_url = std::env::var("BINANCE_API_URL")
+                    .unwrap_or_else(|_| "https://api.binance.com/api/v3".to_string());
+                format!("{}/ping", base_url)
+            },
+            "okx" => {
+                let base_url = std::env::var("OKX_API_URL")
+                    .unwrap_or_else(|_| "https://www.okx.com/api/v5".to_string());
+                format!("{}/public/time", base_url)
+            },
+            "kraken" => {
+                let base_url = std::env::var("KRAKEN_API_URL")
+                    .unwrap_or_else(|_| "https://api.kraken.com/0/public".to_string());
+                format!("{}/Time", base_url)
+            },
             _ => return Ok(100), // Default 100ms
         };
         
@@ -521,7 +545,9 @@ impl BacktestEngine {
             "id": 1
         });
         
-        let response = client.post("https://eth-mainnet.g.alchemy.com/v2/your-api-key")
+        let alchemy_url = std::env::var("ALCHEMY_RPC_URL")
+            .unwrap_or_else(|_| "https://eth-mainnet.g.alchemy.com/v2/your-api-key".to_string());
+        let response = client.post(&alchemy_url)
             .json(&request)
             .send().await?;
         let data: serde_json::Value = response.json().await?;
@@ -547,7 +573,10 @@ impl BacktestEngine {
     
     /// Get current ETH price
     async fn get_eth_price(&self, client: &Client) -> Result<Decimal> {
-        let response = client.get("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd").send().await?;
+        let base_url = std::env::var("COINGECKO_API_URL")
+            .unwrap_or_else(|_| "https://api.coingecko.com/api/v3".to_string());
+        let url = format!("{}/simple/price?ids=ethereum&vs_currencies=usd", base_url);
+        let response = client.get(&url).send().await?;
         let data: serde_json::Value = response.json().await?;
         
         if let Some(price) = data["ethereum"]["usd"].as_f64() {

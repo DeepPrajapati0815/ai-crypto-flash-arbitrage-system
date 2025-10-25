@@ -95,7 +95,8 @@ impl ExecutionEngine {
                     let connector = crate::exchanges::UniswapConnector::new(
                         config, 
                         "your_private_key", // This should come from config
-                        "https://mainnet.infura.io/v3/your_key" // This should come from config
+                        &std::env::var("EVM_RPC_URL")
+                            .unwrap_or_else(|_| "https://mainnet.infura.io/v3/your_key".to_string())
                     )?;
                     manager.add_connector("uniswap".to_string(), Box::new(connector)).await?;
                 },

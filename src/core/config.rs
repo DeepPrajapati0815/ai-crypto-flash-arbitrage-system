@@ -116,8 +116,10 @@ impl Config {
                 secret_key,
                 passphrase: None,
                 base_url: "https://api.binance.com".to_string(),
-                websocket_url: "wss://stream.binance.com:9443/ws".to_string(),
-                rate_limit: 1200,
+                websocket_url: std::env::var("BINANCE_WEBSOCKET_URL")
+                    .unwrap_or_else(|_| "wss://stream.binance.com:9443/ws".to_string()),
+                rate_limit: std::env::var("BINANCE_RATE_LIMIT")
+                    .unwrap_or_else(|_| "1200".to_string()).parse().unwrap_or(1200),
             });
         }
 
@@ -133,8 +135,10 @@ impl Config {
                 secret_key,
                 passphrase: Some(passphrase),
                 base_url: "https://www.okx.com".to_string(),
-                websocket_url: "wss://ws.okx.com:8443/ws/v5/public".to_string(),
-                rate_limit: 20,
+                websocket_url: std::env::var("OKX_WEBSOCKET_URL")
+                    .unwrap_or_else(|_| "wss://ws.okx.com:8443/ws/v5/public".to_string()),
+                rate_limit: std::env::var("OKX_RATE_LIMIT")
+                    .unwrap_or_else(|_| "20".to_string()).parse().unwrap_or(20),
             });
         }
 
@@ -148,8 +152,10 @@ impl Config {
 
         // Risk limits
         let risk_limits = RiskLimits {
-            max_position_size: Decimal::from_str("1000000")?, // $1M
-            max_daily_loss: Decimal::from_str("100000")?,    // $100K
+            max_position_size: Decimal::from_str(&std::env::var("MAX_POSITION_SIZE")
+                .unwrap_or_else(|_| "1000000".to_string()))?, // $1M
+            max_daily_loss: Decimal::from_str(&std::env::var("MAX_DAILY_LOSS")
+                .unwrap_or_else(|_| "100000".to_string()))?,    // $100K
             max_drawdown: Decimal::from_str("0.05")?,        // 5%
             max_leverage: Decimal::from_str("1.0")?,         // 1x
             stop_loss_percentage: Decimal::from_str("0.02")?, // 2%
@@ -157,9 +163,12 @@ impl Config {
 
         // WebSocket configuration
         let websocket_config = WebSocketConfig {
-            reconnect_interval_ms: 1000,
-            heartbeat_interval_ms: 30000,
-            max_reconnect_attempts: 10,
+            reconnect_interval_ms: std::env::var("WEBSOCKET_RECONNECT_INTERVAL_MS")
+                .unwrap_or_else(|_| "1000".to_string()).parse().unwrap_or(1000),
+            heartbeat_interval_ms: std::env::var("WEBSOCKET_HEARTBEAT_INTERVAL_MS")
+                .unwrap_or_else(|_| "30000".to_string()).parse().unwrap_or(30000),
+            max_reconnect_attempts: std::env::var("WEBSOCKET_MAX_RECONNECT_ATTEMPTS")
+                .unwrap_or_else(|_| "10".to_string()).parse().unwrap_or(10),
             buffer_size: 1024 * 1024, // 1MB
         };
 

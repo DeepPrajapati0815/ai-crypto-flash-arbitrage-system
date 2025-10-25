@@ -315,7 +315,8 @@ mod tests {
     #[test]
     fn test_deviation_calculation() {
         let validator = OracleValidator {
-            provider: Arc::new(Provider::<Http>::try_from("http://localhost:8545").unwrap()),
+            provider: Arc::new(Provider::<Http>::try_from(&std::env::var("EVM_RPC_URL")
+                .unwrap_or_else(|_| "http://localhost:8545".to_string())).unwrap()),
             max_deviation_bps: 200,
             min_confidence: 0.8,
             oracle_type: OracleType::Chainlink,
@@ -336,7 +337,8 @@ mod tests {
     #[test]
     fn test_chainlink_feed_addresses() {
         let validator = OracleValidator {
-            provider: Arc::new(Provider::<Http>::try_from("http://localhost:8545").unwrap()),
+            provider: Arc::new(Provider::<Http>::try_from(&std::env::var("EVM_RPC_URL")
+                .unwrap_or_else(|_| "http://localhost:8545".to_string())).unwrap()),
             max_deviation_bps: 200,
             min_confidence: 0.8,
             oracle_type: OracleType::Chainlink,

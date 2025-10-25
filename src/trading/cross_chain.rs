@@ -88,11 +88,16 @@ impl Default for CrossChainRiskParameters {
     fn default() -> Self {
         Self {
             max_bridge_time_minutes: 30,
-            min_profit_threshold: Decimal::from(2) / Decimal::from(100), // 2%
-            max_risk_score: 0.7,
-            max_position_size: Decimal::from(10000),
-            max_daily_volume: Decimal::from(100000),
-            bridge_failure_tolerance: 0.1, // 10%
+            min_profit_threshold: Decimal::from_str(&std::env::var("MIN_PROFIT_THRESHOLD")
+                .unwrap_or_else(|_| "0.02".to_string()))?, // 2%
+            max_risk_score: std::env::var("MAX_RISK_SCORE")
+                .unwrap_or_else(|_| "0.7".to_string()).parse().unwrap_or(0.7),
+            max_position_size: Decimal::from_str(&std::env::var("MAX_POSITION_SIZE")
+                .unwrap_or_else(|_| "10000".to_string()))?,
+            max_daily_volume: Decimal::from_str(&std::env::var("MAX_DAILY_VOLUME")
+                .unwrap_or_else(|_| "100000".to_string()))?,
+            bridge_failure_tolerance: std::env::var("BRIDGE_FAILURE_TOLERANCE")
+                .unwrap_or_else(|_| "0.1".to_string()).parse().unwrap_or(0.1), // 10%
         }
     }
 }
@@ -465,10 +470,10 @@ impl CrossChainArbitrageManager {
                                 source_price: *source_price,
                                 target_price: *target_price,
                                 price_difference: price_diff,
-                                price_difference_percent: price_diff * Decimal::from(100),
+                                price_difference_percent: price_diff * Decimal::from_str("100")?,
                                 bridge_fee: bridge_fee,
                                 net_profit: net_profit,
-                                net_profit_percent: net_profit * Decimal::from(100),
+                                net_profit_percent: net_profit * Decimal::from_str("100")?,
                                 bridge: bridge.clone(),
                                 estimated_execution_time: 5, // 5 minutes
                                 confidence: self.calculate_confidence(&bridge, price_diff),
@@ -556,11 +561,14 @@ impl CrossChainArbitrageManager {
                 name: "Polygon Bridge".to_string(),
                 from_chain: Blockchain::Ethereum,
                 to_chain: Blockchain::Polygon,
-                bridge_fee: Decimal::from(5) / Decimal::from(1000), // 0.5%
+                bridge_fee: Decimal::from_str(&std::env::var("BRIDGE_FEE_POLYGON")
+                    .unwrap_or_else(|_| "0.005".to_string()))?, // 0.5%
                 bridge_time_minutes: 10,
                 supported_tokens: vec!["USDC".to_string(), "USDT".to_string(), "WETH".to_string()],
-                min_transfer_amount: Decimal::from(100),
-                max_transfer_amount: Decimal::from(100000),
+                min_transfer_amount: Decimal::from_str(&std::env::var("MIN_TRANSFER_POLYGON")
+                    .unwrap_or_else(|_| "100".to_string()))?,
+                max_transfer_amount: Decimal::from_str(&std::env::var("MAX_TRANSFER_POLYGON")
+                    .unwrap_or_else(|_| "100000".to_string()))?,
                 is_active: true,
             },
             Bridge {
@@ -568,11 +576,14 @@ impl CrossChainArbitrageManager {
                 name: "Avalanche Bridge".to_string(),
                 from_chain: Blockchain::Ethereum,
                 to_chain: Blockchain::Avalanche,
-                bridge_fee: Decimal::from(3) / Decimal::from(1000), // 0.3%
+                bridge_fee: Decimal::from_str(&std::env::var("BRIDGE_FEE_ARBITRUM")
+                    .unwrap_or_else(|_| "0.003".to_string()))?, // 0.3%
                 bridge_time_minutes: 15,
                 supported_tokens: vec!["USDC".to_string(), "USDT".to_string(), "WETH".to_string()],
-                min_transfer_amount: Decimal::from(50),
-                max_transfer_amount: Decimal::from(50000),
+                min_transfer_amount: Decimal::from_str(&std::env::var("MIN_TRANSFER_ARBITRUM")
+                    .unwrap_or_else(|_| "50".to_string()))?,
+                max_transfer_amount: Decimal::from_str(&std::env::var("MAX_TRANSFER_ARBITRUM")
+                    .unwrap_or_else(|_| "50000".to_string()))?,
                 is_active: true,
             },
             Bridge {
@@ -580,11 +591,14 @@ impl CrossChainArbitrageManager {
                 name: "Arbitrum Bridge".to_string(),
                 from_chain: Blockchain::Ethereum,
                 to_chain: Blockchain::Arbitrum,
-                bridge_fee: Decimal::from(2) / Decimal::from(1000), // 0.2%
+                bridge_fee: Decimal::from_str(&std::env::var("BRIDGE_FEE_OPTIMISM")
+                    .unwrap_or_else(|_| "0.002".to_string()))?, // 0.2%
                 bridge_time_minutes: 7,
                 supported_tokens: vec!["USDC".to_string(), "USDT".to_string(), "WETH".to_string()],
-                min_transfer_amount: Decimal::from(200),
-                max_transfer_amount: Decimal::from(200000),
+                min_transfer_amount: Decimal::from_str(&std::env::var("MIN_TRANSFER_OPTIMISM")
+                    .unwrap_or_else(|_| "200".to_string()))?,
+                max_transfer_amount: Decimal::from_str(&std::env::var("MAX_TRANSFER_OPTIMISM")
+                    .unwrap_or_else(|_| "200000".to_string()))?,
                 is_active: true,
             },
         ];
@@ -655,12 +669,18 @@ impl CrossChainArbitrageManager {
     /// Get RPC URL for a specific chain
     fn get_chain_rpc_url(&self, chain: &Blockchain) -> Result<String> {
         match chain {
-            Blockchain::Ethereum => Ok("https://eth-mainnet.g.alchemy.com/v2/your-api-key".to_string()),
-            Blockchain::Polygon => Ok("https://polygon-mainnet.g.alchemy.com/v2/your-api-key".to_string()),
-            Blockchain::Avalanche => Ok("https://api.avax.network/ext/bc/C/rpc".to_string()),
-            Blockchain::Arbitrum => Ok("https://arb-mainnet.g.alchemy.com/v2/your-api-key".to_string()),
-            Blockchain::Optimism => Ok("https://opt-mainnet.g.alchemy.com/v2/your-api-key".to_string()),
-            Blockchain::BinanceSmartChain => Ok("https://bsc-dataseed.binance.org/".to_string()),
+            Blockchain::Ethereum => Ok(std::env::var("ETHEREUM_RPC_URL")
+                .unwrap_or_else(|_| "https://eth-mainnet.g.alchemy.com/v2/your-api-key".to_string())),
+            Blockchain::Polygon => Ok(std::env::var("POLYGON_RPC_URL")
+                .unwrap_or_else(|_| "https://polygon-mainnet.g.alchemy.com/v2/your-api-key".to_string())),
+            Blockchain::Avalanche => Ok(std::env::var("AVALANCHE_RPC_URL")
+                .unwrap_or_else(|_| "https://api.avax.network/ext/bc/C/rpc".to_string())),
+            Blockchain::Arbitrum => Ok(std::env::var("ARBITRUM_RPC_URL")
+                .unwrap_or_else(|_| "https://arb-mainnet.g.alchemy.com/v2/your-api-key".to_string())),
+            Blockchain::Optimism => Ok(std::env::var("OPTIMISM_RPC_URL")
+                .unwrap_or_else(|_| "https://opt-mainnet.g.alchemy.com/v2/your-api-key".to_string())),
+            Blockchain::BinanceSmartChain => Ok(std::env::var("BSC_RPC_URL")
+                .unwrap_or_else(|_| "https://bsc-dataseed.binance.org/".to_string())),
             _ => Err(anyhow::anyhow!("Unsupported chain: {:?}", chain)),
         }
     }
@@ -670,9 +690,12 @@ impl CrossChainArbitrageManager {
         let chain_id = self.get_chain_id(chain);
         let token_address = self.get_token_address(token, chain)?;
         
-        let url = format!("https://api.1inch.io/v5.0/{}/quote", chain_id);
+        let base_url = std::env::var("1INCH_API_URL")
+            .unwrap_or_else(|_| "https://api.1inch.io/v5.0".to_string());
+        let url = format!("{}/{}/quote", base_url, chain_id);
         let params = [
-            ("fromTokenAddress", "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"), // ETH
+            ("fromTokenAddress", &std::env::var("ETH_NATIVE_ADDRESS")
+                .unwrap_or_else(|_| "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string())), // ETH
             ("toTokenAddress", &token_address),
             ("amount", "1000000000000000000"), // 1 ETH
         ];
@@ -693,9 +716,12 @@ impl CrossChainArbitrageManager {
         let chain_id = self.get_chain_id(chain);
         let token_address = self.get_token_address(token, chain)?;
         
-        let url = format!("https://api.0x.org/swap/v1/quote");
+        let base_url = std::env::var("0X_API_URL")
+            .unwrap_or_else(|_| "https://api.0x.org/swap/v1".to_string());
+        let url = format!("{}/quote", base_url);
         let params = [
-            ("sellToken", "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+            ("sellToken", &std::env::var("ETH_NATIVE_ADDRESS")
+                .unwrap_or_else(|_| "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string())),
             ("buyToken", &token_address),
             ("sellAmount", "1000000000000000000"),
             ("chainId", &chain_id.to_string()),
@@ -756,7 +782,9 @@ impl CrossChainArbitrageManager {
             _ => return Err(anyhow::anyhow!("Unsupported token for CoinGecko: {}", token)),
         };
         
-        let url = format!("https://api.coingecko.com/api/v3/simple/price?ids={}&vs_currencies=usd", coin_id);
+        let base_url = std::env::var("COINGECKO_API_URL")
+            .unwrap_or_else(|_| "https://api.coingecko.com/api/v3".to_string());
+        let url = format!("{}/simple/price?ids={}&vs_currencies=usd", base_url, coin_id);
         let response = client.get(&url).send().await?;
         let data: serde_json::Value = response.json().await?;
         
@@ -783,14 +811,22 @@ impl CrossChainArbitrageManager {
     /// Get token contract address for a specific chain
     fn get_token_address(&self, token: &str, chain: &Blockchain) -> Result<String> {
         match (token, chain) {
-            ("WETH", Blockchain::Ethereum) => Ok("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
-            ("WETH", Blockchain::Polygon) => Ok("0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619".to_string()),
-            ("WETH", Blockchain::Arbitrum) => Ok("0x82aF49447D8a07e3bd95BD0d56f35241523fBab1".to_string()),
-            ("WETH", Blockchain::Optimism) => Ok("0x4200000000000000000000000000000000000006".to_string()),
-            ("USDC", Blockchain::Ethereum) => Ok("0xA0b86a33E6441b8C4C8C0C1234567890AbCdEf12".to_string()),
-            ("USDC", Blockchain::Polygon) => Ok("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174".to_string()),
-            ("USDC", Blockchain::Arbitrum) => Ok("0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8".to_string()),
-            ("USDC", Blockchain::Optimism) => Ok("0x7F5c764cBc14f9669B88837ca1490cCa17c31607".to_string()),
+            ("WETH", Blockchain::Ethereum) => Ok(std::env::var("WETH_ADDRESS")
+                .unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string())),
+            ("WETH", Blockchain::Polygon) => Ok(std::env::var("WETH_POLYGON_ADDRESS")
+                .unwrap_or_else(|_| "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619".to_string())),
+            ("WETH", Blockchain::Arbitrum) => Ok(std::env::var("WETH_ARBITRUM_ADDRESS")
+                .unwrap_or_else(|_| "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1".to_string())),
+            ("WETH", Blockchain::Optimism) => Ok(std::env::var("WETH_OPTIMISM_ADDRESS")
+                .unwrap_or_else(|_| "0x4200000000000000000000000000000000000006".to_string())),
+            ("USDC", Blockchain::Ethereum) => Ok(std::env::var("USDC_ADDRESS")
+                .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string())),
+            ("USDC", Blockchain::Polygon) => Ok(std::env::var("USDC_POLYGON_ADDRESS")
+                .unwrap_or_else(|_| "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174".to_string())),
+            ("USDC", Blockchain::Arbitrum) => Ok(std::env::var("USDC_ARBITRUM_ADDRESS")
+                .unwrap_or_else(|_| "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8".to_string())),
+            ("USDC", Blockchain::Optimism) => Ok(std::env::var("USDC_OPTIMISM_ADDRESS")
+                .unwrap_or_else(|_| "0x7F5c764cBc14f9669B88837ca1490cCa17c31607".to_string())),
             _ => Err(anyhow::anyhow!("Token {} not supported on chain {:?}", token, chain)),
         }
     }
@@ -798,9 +834,12 @@ impl CrossChainArbitrageManager {
     /// Get Chainlink oracle address for a token
     fn get_chainlink_oracle_address(&self, token: &str, chain: &Blockchain) -> Result<String> {
         match (token, chain) {
-            ("WETH", Blockchain::Ethereum) => Ok("0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419".to_string()),
-            ("WBTC", Blockchain::Ethereum) => Ok("0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599".to_string()),
-            ("USDC", Blockchain::Ethereum) => Ok("0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6".to_string()),
+            ("WETH", Blockchain::Ethereum) => Ok(std::env::var("WETH_CHAINLINK_ORACLE")
+                .unwrap_or_else(|_| "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419".to_string())),
+            ("WBTC", Blockchain::Ethereum) => Ok(std::env::var("WBTC_CHAINLINK_ORACLE")
+                .unwrap_or_else(|_| "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599".to_string())),
+            ("USDC", Blockchain::Ethereum) => Ok(std::env::var("USDC_CHAINLINK_ORACLE")
+                .unwrap_or_else(|_| "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6".to_string())),
             _ => Err(anyhow::anyhow!("No Chainlink oracle for {} on {:?}", token, chain)),
         }
     }

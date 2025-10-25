@@ -346,8 +346,10 @@ mod tests {
         
         let routes = vec![
             SecureTradeRoute {
-                token_in: Address::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                token_out: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                token_in: Address::from_str(&std::env::var("USDC_ADDRESS")
+                    .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string())).unwrap(),
+                token_out: Address::from_str(&std::env::var("WETH_ADDRESS")
+                    .unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string())).unwrap(),
                 amount_in: U256::from(1000000u64),
                 min_amount_out: U256::from(500000000000000000u64),
                 pool_fee: 3000,
@@ -357,19 +359,23 @@ mod tests {
         ];
 
         let hash1 = validator.compute_route_hash(
-            Address::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+            Address::from_str(&std::env::var("USDC_ADDRESS")
+                .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string())).unwrap(),
             U256::from(1000000u64),
             &routes,
             U256::from(1),
-            Address::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+            Address::from_str(&std::env::var("TEST_ADDRESS")
+                .unwrap_or_else(|_| "0x0000000000000000000000000000000000000001".to_string())).unwrap(),
         );
 
         let hash2 = validator.compute_route_hash(
-            Address::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+            Address::from_str(&std::env::var("USDC_ADDRESS")
+                .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string())).unwrap(),
             U256::from(1000000u64),
             &routes,
             U256::from(1),
-            Address::from_str("0x0000000000000000000000000000000000000001").unwrap(),
+            Address::from_str(&std::env::var("TEST_ADDRESS")
+                .unwrap_or_else(|_| "0x0000000000000000000000000000000000000001".to_string())).unwrap(),
         );
 
         // Same inputs should produce same hash
@@ -382,8 +388,10 @@ mod tests {
         
         let valid_routes = vec![
             SecureTradeRoute {
-                token_in: Address::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
-                token_out: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                token_in: Address::from_str(&std::env::var("USDC_ADDRESS")
+                    .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string())).unwrap(),
+                token_out: Address::from_str(&std::env::var("WETH_ADDRESS")
+                    .unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string())).unwrap(),
                 amount_in: U256::from(1000000u64),
                 min_amount_out: U256::from(500000000000000000u64),
                 pool_fee: 3000,
@@ -391,8 +399,10 @@ mod tests {
                 deadline: 2000000000,
             },
             SecureTradeRoute {
-                token_in: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                token_out: Address::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap(),
+                token_in: Address::from_str(&std::env::var("WETH_ADDRESS")
+                    .unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string())).unwrap(),
+                token_out: Address::from_str(&std::env::var("USDC_ADDRESS")
+                    .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string())).unwrap(),
                 amount_in: U256::from(500000000000000000u64),
                 min_amount_out: U256::from(1010000u64),
                 pool_fee: 3000,

@@ -568,7 +568,9 @@ impl MarketMakingManager {
     /// Fetch order book from Binance
     async fn fetch_binance_orderbook(&self, client: &Client, pair: &TradingPair) -> Result<Decimal> {
         let symbol = self.convert_pair_to_binance_symbol(pair)?;
-        let url = format!("https://api.binance.com/api/v3/depth?symbol={}&limit=5", symbol);
+        let base_url = std::env::var("BINANCE_API_URL")
+            .unwrap_or_else(|_| "https://api.binance.com/api/v3".to_string());
+        let url = format!("{}/depth?symbol={}&limit=5", base_url, symbol);
         
         let response = client.get(&url).send().await?;
         let data: serde_json::Value = response.json().await?;
@@ -588,7 +590,9 @@ impl MarketMakingManager {
     /// Fetch order book from OKX
     async fn fetch_okx_orderbook(&self, client: &Client, pair: &TradingPair) -> Result<Decimal> {
         let symbol = self.convert_pair_to_okx_symbol(pair)?;
-        let url = format!("https://www.okx.com/api/v5/market/books?instId={}&sz=5", symbol);
+        let base_url = std::env::var("OKX_API_URL")
+            .unwrap_or_else(|_| "https://www.okx.com/api/v5".to_string());
+        let url = format!("{}/market/books?instId={}&sz=5", base_url, symbol);
         
         let response = client.get(&url).send().await?;
         let data: serde_json::Value = response.json().await?;
@@ -612,7 +616,9 @@ impl MarketMakingManager {
     /// Fetch order book from Kraken
     async fn fetch_kraken_orderbook(&self, client: &Client, pair: &TradingPair) -> Result<Decimal> {
         let symbol = self.convert_pair_to_kraken_symbol(pair)?;
-        let url = format!("https://api.kraken.com/0/public/Depth?pair={}&count=5", symbol);
+        let base_url = std::env::var("KRAKEN_API_URL")
+            .unwrap_or_else(|_| "https://api.kraken.com/0/public".to_string());
+        let url = format!("{}/Depth?pair={}&count=5", base_url, symbol);
         
         let response = client.get(&url).send().await?;
         let data: serde_json::Value = response.json().await?;
@@ -636,7 +642,9 @@ impl MarketMakingManager {
     /// Fetch order book from Coinbase
     async fn fetch_coinbase_orderbook(&self, client: &Client, pair: &TradingPair) -> Result<Decimal> {
         let symbol = self.convert_pair_to_coinbase_symbol(pair)?;
-        let url = format!("https://api.exchange.coinbase.com/products/{}/book?level=2", symbol);
+        let base_url = std::env::var("COINBASE_API_URL")
+            .unwrap_or_else(|_| "https://api.exchange.coinbase.com".to_string());
+        let url = format!("{}/products/{}/book?level=2", base_url, symbol);
         
         let response = client.get(&url).send().await?;
         let data: serde_json::Value = response.json().await?;

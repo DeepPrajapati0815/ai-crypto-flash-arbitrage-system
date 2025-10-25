@@ -26,7 +26,10 @@ impl UniswapConnector {
     pub fn new(config: ExchangeConfig, private_key: &str, rpc_url: &str) -> Result<Self> {
         let provider = Provider::<Http>::try_from(rpc_url)?;
         let wallet = private_key.parse::<LocalWallet>()?;
-        let router_address = Address::from_str("0xE592427A0AEce92De3Edee1F18E0157C05861564")?; // Uniswap V3 Router
+        let router_address = Address::from_str(
+            &std::env::var("UNISWAP_V3_ROUTER")
+                .unwrap_or_else(|_| "0xE592427A0AEce92De3Edee1F18E0157C05861564".to_string())
+        )?; // Uniswap V3 Router
         
         Ok(Self {
             client: Client::new(),
@@ -40,12 +43,12 @@ impl UniswapConnector {
 
     /// Get token address for a symbol
     async fn get_token_address(&self, symbol: &str) -> Result<Address> {
-        // Common token addresses (in production, this should be fetched from a registry)
-        let token_addresses: HashMap<&str, &str> = [
-            ("USDC", "0xA0b86a33E6441b8C4C8C0b4C8C0b4C8C0b4C8C0b4"),
-            ("USDT", "0xdAC17F958D2ee523a2206206994597C13D831ec7"),
-            ("WETH", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
-            ("WBTC", "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"),
+        // Get token addresses from environment variables
+        let token_addresses: HashMap<&str, String> = [
+            ("USDC", std::env::var("USDC_ADDRESS").unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string())),
+            ("USDT", std::env::var("USDT_ADDRESS").unwrap_or_else(|_| "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string())),
+            ("WETH", std::env::var("WETH_ADDRESS").unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string())),
+            ("WBTC", std::env::var("WBTC_ADDRESS").unwrap_or_else(|_| "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599".to_string())),
         ].iter().cloned().collect();
         
         if let Some(&address) = token_addresses.get(symbol) {
@@ -59,7 +62,10 @@ impl UniswapConnector {
     async fn get_pool_address(&self, token0: Address, token1: Address, fee: u32) -> Result<Address> {
         // In production, this should use the Uniswap V3 Factory to get the pool address
         // For now, we'll use a placeholder
-        Ok(Address::from_str("0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640")?) // USDC/WETH 0.05% pool
+        Ok(Address::from_str(
+            &std::env::var("UNISWAP_V3_USDC_WETH_POOL")
+                .unwrap_or_else(|_| "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640".to_string())
+        )?) // USDC/WETH 0.05% pool
     }
 
     /// Get current price from Uniswap
@@ -159,11 +165,20 @@ impl UniswapOrderManager {
 
     /// Get token address for a symbol
     async fn get_token_address(&self, symbol: &str) -> Result<Address> {
+        let usdc_addr = std::env::var("USDC_ADDRESS")
+            .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string());
+        let usdt_addr = std::env::var("USDT_ADDRESS")
+            .unwrap_or_else(|_| "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string());
+        let weth_addr = std::env::var("WETH_ADDRESS")
+            .unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string());
+        let wbtc_addr = std::env::var("WBTC_ADDRESS")
+            .unwrap_or_else(|_| "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599".to_string());
+        
         let token_addresses: HashMap<&str, &str> = [
-            ("USDC", "0xA0b86a33E6441b8C4C8C0b4C8C0b4C8C0b4C8C0b4"),
-            ("USDT", "0xdAC17F958D2ee523a2206206994597C13D831ec7"),
-            ("WETH", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
-            ("WBTC", "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"),
+            ("USDC", &usdc_addr),
+            ("USDT", &usdt_addr),
+            ("WETH", &weth_addr),
+            ("WBTC", &wbtc_addr),
         ].iter().cloned().collect();
         
         if let Some(&address) = token_addresses.get(symbol) {
