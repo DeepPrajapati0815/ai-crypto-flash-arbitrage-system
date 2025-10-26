@@ -11,11 +11,8 @@ Run: `.\deploy-full.ps1` (Windows) or `./deploy-full.sh` (Linux/Mac)
 Run: `docker compose -f docker-compose.local.yml up -d --build`
 
 ### I want the absolute quickest start
-→ **[START_HERE.md](START_HERE.md)**  
+→ **[QUICK_START.md](QUICK_START.md)**  
 Quick command reference
-
-### I want to understand my deployment options
-→ **[DEPLOYMENT_OPTIONS.md](DEPLOYMENT_OPTIONS.md)**
 
 ### I'm having build issues
 → **[DOCKER_BUILD_TROUBLESHOOTING.md](DOCKER_BUILD_TROUBLESHOOTING.md)**
@@ -30,33 +27,24 @@ Quick command reference
 |----------|---------|--------------|
 | **[COMPLETE_DEPLOYMENT_README.md](COMPLETE_DEPLOYMENT_README.md)** | Full system deployment | Deploy everything |
 | **[LOCAL_DEPLOYMENT_GUIDE.md](LOCAL_DEPLOYMENT_GUIDE.md)** | Local with ML training | Dev + ML, no monitoring |
-| **[START_HERE.md](START_HERE.md)** | Quick command reference | Quick testing |
-| **[DEPLOYMENT_OPTIONS.md](DEPLOYMENT_OPTIONS.md)** | Compare deployment types | Choosing setup |
-| **[BUILD_COMMANDS.md](BUILD_COMMANDS.md)** | All commands reference | Need specific commands |
+| **[QUICK_START.md](QUICK_START.md)** | Quick command reference | Quick testing |
 
 ### Problem Solving
 
 | Document | Purpose | When to Read |
 |----------|---------|--------------|
 | **[DOCKER_BUILD_TROUBLESHOOTING.md](DOCKER_BUILD_TROUBLESHOOTING.md)** | Build error solutions | Build failing |
-| **[ISSUE_RESOLUTION_SUMMARY.md](ISSUE_RESOLUTION_SUMMARY.md)** | What was fixed | Understanding fixes |
-| **[SETUP_VISUAL_GUIDE.md](SETUP_VISUAL_GUIDE.md)** | Visual explanations | Visual learner |
 
 ### Detailed Guides
 
 | Document | Purpose | When to Read |
 |----------|---------|--------------|
-| **[DOCKER_DEPLOYMENT_GUIDE.md](DOCKER_DEPLOYMENT_GUIDE.md)** | Detailed Docker guide | Deep dive |
-| **[LOCAL_SETUP_GUIDE.md](LOCAL_SETUP_GUIDE.md)** | Local development | Not using Docker |
-| **[TESTNET_DEPLOYMENT_GUIDE.md](TESTNET_DEPLOYMENT_GUIDE.md)** | Testnet deployment | Test before mainnet |
 | **[PRODUCTION_DEPLOYMENT_GUIDE.md](PRODUCTION_DEPLOYMENT_GUIDE.md)** | Production best practices | Going live |
 
 ### Technical Documentation
 
 | Document | Purpose | When to Read |
 |----------|---------|--------------|
-| **[COMPREHENSIVE_AUDIT_REPORT.md](COMPREHENSIVE_AUDIT_REPORT.md)** | Security audit | Understanding security |
-| **[SIMPLIFIED_DEPLOYMENT_SUMMARY.md](SIMPLIFIED_DEPLOYMENT_SUMMARY.md)** | Recent simplifications | What changed |
 | **docs/MEV_BUNDLE_IMPLEMENTATION_GUIDE.md** | MEV implementation | MEV bundles |
 | **docs/VALIDATION_GUIDE.md** | System validation | Verify setup |
 
@@ -64,7 +52,6 @@ Quick command reference
 
 | Document | Purpose | When to Read |
 |----------|---------|--------------|
-| **ml_training/QUICK_START.md** | Quick ML training | Train models quickly |
 | **ml_training/README.md** | Detailed ML guide | Deep ML dive |
 
 ---
@@ -100,14 +87,8 @@ docker compose up -d --build
 ### "I'm getting build errors"
 → [DOCKER_BUILD_TROUBLESHOOTING.md](DOCKER_BUILD_TROUBLESHOOTING.md)
 
-### "Where do I put environment variables?"
-→ [SETUP_VISUAL_GUIDE.md](SETUP_VISUAL_GUIDE.md)
-
 ### "How do I train ML models?"
-→ [ml_training/QUICK_START.md](ml_training/QUICK_START.md)
-
-### "What's the difference between docker-compose files?"
-→ [DEPLOYMENT_OPTIONS.md](DEPLOYMENT_OPTIONS.md)
+→ [ml_training/README.md](ml_training/README.md)
 
 ### "How long does deployment take?"
 → [COMPLETE_DEPLOYMENT_README.md](COMPLETE_DEPLOYMENT_README.md#-what-happens-timeline)
@@ -136,26 +117,18 @@ ai-crypto-flash-arbitrage-system/
 │   ├── README.md                 (Project overview)
 │   ├── INDEX.md                  (This file)
 │   ├── COMPLETE_DEPLOYMENT_README.md  (Complete guide ⭐)
-│   ├── START_HERE.md             (Quick start)
-│   └── DEPLOYMENT_OPTIONS.md     (Compare options)
+│   └── QUICK_START.md            (Quick start)
 │
 ├── 🔧 Troubleshooting
-│   ├── DOCKER_BUILD_TROUBLESHOOTING.md
-│   ├── ISSUE_RESOLUTION_SUMMARY.md
-│   └── SETUP_VISUAL_GUIDE.md
+│   └── DOCKER_BUILD_TROUBLESHOOTING.md
 │
 ├── 📚 Detailed Guides
-│   ├── BUILD_COMMANDS.md
-│   ├── DOCKER_DEPLOYMENT_GUIDE.md
-│   ├── LOCAL_SETUP_GUIDE.md
-│   ├── TESTNET_DEPLOYMENT_GUIDE.md
 │   └── PRODUCTION_DEPLOYMENT_GUIDE.md
 │
 └── 🤖 ML Training
     └── ml_training/
         ├── Dockerfile            (Python ML container)
         ├── requirements.txt      (Python dependencies)
-        ├── QUICK_START.md        (Quick ML guide)
         └── README.md             (Detailed ML guide)
 ```
 
@@ -165,33 +138,28 @@ ai-crypto-flash-arbitrage-system/
 
 | Document | Time | Complexity |
 |----------|------|------------|
-| START_HERE.md | 2 min | ⭐ Easy |
-| DEPLOYMENT_OPTIONS.md | 3 min | ⭐ Easy |
+| QUICK_START.md | 2 min | ⭐ Easy |
 | COMPLETE_DEPLOYMENT_README.md | 10 min | ⭐⭐ Medium |
-| BUILD_COMMANDS.md | 5 min | ⭐ Easy |
 | DOCKER_BUILD_TROUBLESHOOTING.md | 15 min | ⭐⭐⭐ Advanced |
-| SETUP_VISUAL_GUIDE.md | 10 min | ⭐⭐ Medium |
 
 ---
 
 ## 🎓 Learning Path
 
 ### Beginner Path
-1. Read [START_HERE.md](START_HERE.md) (2 min)
+1. Read [QUICK_START.md](QUICK_START.md) (2 min)
 2. Run local deployment (10 min)
 3. If issues: [DOCKER_BUILD_TROUBLESHOOTING.md](DOCKER_BUILD_TROUBLESHOOTING.md)
 
 ### Intermediate Path
-1. Read [DEPLOYMENT_OPTIONS.md](DEPLOYMENT_OPTIONS.md) (3 min)
-2. Choose deployment type
-3. Read specific guide
-4. Deploy!
-
-### Advanced Path
-1. Read [COMPLETE_DEPLOYMENT_README.md](COMPLETE_DEPLOYMENT_README.md)
+1. Read [COMPLETE_DEPLOYMENT_README.md](COMPLETE_DEPLOYMENT_README.md) (10 min)
 2. Deploy complete system
 3. Customize configuration
-4. Train custom ML models
+
+### Advanced Path
+1. Read [PRODUCTION_DEPLOYMENT_GUIDE.md](PRODUCTION_DEPLOYMENT_GUIDE.md)
+2. Deploy to production
+3. Train custom ML models
 
 ---
 
@@ -199,8 +167,7 @@ ai-crypto-flash-arbitrage-system/
 
 1. **Always start with**: [README.md](README.md)
 2. **Having issues?** Check: [DOCKER_BUILD_TROUBLESHOOTING.md](DOCKER_BUILD_TROUBLESHOOTING.md)
-3. **Want to understand?** Read: [SETUP_VISUAL_GUIDE.md](SETUP_VISUAL_GUIDE.md)
-4. **Going to production?** Follow: [PRODUCTION_DEPLOYMENT_GUIDE.md](PRODUCTION_DEPLOYMENT_GUIDE.md)
+3. **Going to production?** Follow: [PRODUCTION_DEPLOYMENT_GUIDE.md](PRODUCTION_DEPLOYMENT_GUIDE.md)
 
 ---
 
