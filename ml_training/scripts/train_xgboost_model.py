@@ -26,7 +26,7 @@ import pickle
 import argparse
 import time
 import os
-# ✅ AUDIT FIX ISSUE #H4: Import technical indicators module
+# [OK] AUDIT FIX ISSUE #H4: Import technical indicators module
 from technical_indicators import (
     calculate_rsi, calculate_macd, calculate_ema,
     calculate_bollinger_bands, calculate_atr, calculate_obv,
@@ -36,7 +36,7 @@ from technical_indicators import (
 
 def load_real_market_data_from_csv(csv_path, min_samples=1000):
     """
-    ✅ ISSUE #9 FIX: Load real historical market data from CSV
+    [OK] ISSUE #9 FIX: Load real historical market data from CSV
     
     Expected CSV format:
     timestamp,pair,buy_exchange,sell_exchange,buy_price,sell_price,
@@ -55,7 +55,7 @@ def load_real_market_data_from_csv(csv_path, min_samples=1000):
     import pandas as pd
     from datetime import datetime
     
-    print(f"\n✅ ISSUE #9 FIX: Loading real market data from CSV: {csv_path}")
+    print(f"\n[OK] ISSUE #9 FIX: Loading real market data from CSV: {csv_path}")
     
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
@@ -80,7 +80,7 @@ def load_real_market_data_from_csv(csv_path, min_samples=1000):
     df['volume_ratio'] = df['buy_volume'] / (df['sell_volume'] + 1e-8)
     df['price_momentum'] = df.groupby('pair')['buy_price'].transform(lambda x: x.pct_change())
     
-    # ✅ AUDIT FIX ISSUE #H4: Calculate real technical indicators (including OBV)
+    # [OK] AUDIT FIX ISSUE #H4: Calculate real technical indicators (including OBV)
     print("   📊 Calculating technical indicators (RSI, MACD, Bollinger, ATR, OBV, Stochastic)...")
     
     # Use mid-price for technical calculations
@@ -113,7 +113,7 @@ def load_real_market_data_from_csv(csv_path, min_samples=1000):
     timestamps = []
     
     for idx, row in df.iterrows():
-        # ✅ AUDIT FIX ISSUE #H4: Extract real technical indicators (including OBV)
+        # [OK] AUDIT FIX ISSUE #H4: Extract real technical indicators (including OBV)
         feature_vector = [
             # Price features (7)
             row['buy_price'] / 1000,
@@ -136,7 +136,7 @@ def load_real_market_data_from_csv(csv_path, min_samples=1000):
             row.get('order_book_depth', 100.0),
             row.get('exchange_fee', 0.002),
             
-            # ✅ Technical indicators (35 real features matching Rust inference)
+            # [OK] Technical indicators (35 real features matching Rust inference)
             # RSI (1)
             row.get('rsi_14', 50.0) / 100.0,  # Normalize to 0-1
             
@@ -162,7 +162,7 @@ def load_real_market_data_from_csv(csv_path, min_samples=1000):
             # ATR (1)
             row.get('atr_14', 0.0) / (row['close'] + 1e-8),  # Normalized by price
             
-            # OBV (2) - ✅ CRITICAL FIX: This was missing before
+            # OBV (2) - [OK] CRITICAL FIX: This was missing before
             row.get('obv', 0.0) / 1e6,  # Scale down
             row.get('obv_ema', 0.0) / 1e6,
             
@@ -215,7 +215,7 @@ def load_real_market_data_from_csv(csv_path, min_samples=1000):
         
         timestamps.append(row['timestamp'])
     
-    print(f"   ✅ Extracted {len(features)} feature vectors (50 features each)")
+    print(f"   [OK] Extracted {len(features)} feature vectors (50 features each)")
     print(f"   Label distribution: {sum(labels)}/{len(labels)} profitable ({sum(labels)/len(labels)*100:.1f}%)")
     
     return np.array(features), np.array(labels), timestamps
@@ -229,7 +229,7 @@ def load_real_market_data_from_database(
     min_samples=1000
 ):
     """
-    ✅ ISSUE #9 FIX: Load real historical data from PostgreSQL database
+    [OK] ISSUE #9 FIX: Load real historical data from PostgreSQL database
     
     Args:
         connection_string: PostgreSQL connection string
@@ -249,37 +249,102 @@ def load_real_market_data_from_database(
     except ImportError:
         raise ImportError("Install psycopg2: pip install psycopg2-binary")
     
-    print(f"\n✅ ISSUE #9 FIX: Loading from database ({start_date} to {end_date})")
+    print(f"\n[OK] ISSUE #9 FIX: Loading from database ({start_date} to {end_date})")
     
-    # Connect to database
-    conn = psycopg2.connect(connection_string)
+    # Connect to database with proper error handling
+    try:
+        conn = psycopg2.connect(connection_string)
+        print(f"   ✅ Connected to database successfully")
+    except Exception as e:
+        raise ConnectionError(f"Failed to connect to database: {e}")
     
-    # Build query
+    # Build query with proper pair filtering
     pair_filter = ""
     if pairs:
-        pair_list = "','".join(pairs)
-        pair_filter = f"AND pair IN ('{pair_list}')"
+        # Convert pairs to match our database format (e.g., 'BTC/USDT' -> 'BTC')
+        pair_list = "','".join([pair.split('/')[0] for pair in pairs])
+        pair_filter = f"AND ms.pair IN ('{pair_list}')"
     
     query = f"""
         SELECT 
-            timestamp, pair, buy_price, sell_price, buy_volume, sell_volume,
-            bid_ask_spread, order_book_depth, exchange_fee, gas_cost,
-            executed, profit
-        FROM historical_ticks
-        WHERE timestamp BETWEEN %s AND %s
+            ms.timestamp, 
+            CONCAT(ms.pair, '/USDT') as pair,
+            ms.bid_price::numeric as buy_price,
+            ms.ask_price::numeric as sell_price,
+            ms.volume_24h::numeric as buy_volume,
+            ms.volume_24h::numeric as sell_volume,
+            (ms.ask_price::numeric - ms.bid_price::numeric) as bid_ask_spread,
+            1000.0 as order_book_depth,
+            0.001 as exchange_fee,
+            0.0 as gas_cost,
+            CASE WHEN ms.last_price::numeric > ms.bid_price::numeric THEN 1 ELSE 0 END as executed,
+            CASE WHEN ms.last_price::numeric > ms.bid_price::numeric THEN (ms.last_price::numeric - ms.bid_price::numeric) ELSE 0.0 END as profit
+        FROM market_snapshots ms
+        WHERE ms.timestamp BETWEEN %s AND %s
         {pair_filter}
-        ORDER BY timestamp ASC
+        ORDER BY ms.timestamp ASC
         LIMIT 1000000;
     """
     
     print(f"   Executing query...")
-    df = pd.read_sql_query(query, conn, params=(start_date, end_date))
-    conn.close()
+    print(f"   Query: {query[:200]}...")
+    print(f"   Params: start_date={start_date} (type: {type(start_date)}), end_date={end_date} (type: {type(end_date)})")
+    
+    # Ensure parameters are strings
+    start_date = str(start_date)
+    end_date = str(end_date)
+    print(f"   Converted params: start_date={start_date}, end_date={end_date}")
+    
+    try:
+        # Fix parameter passing - use list instead of tuple
+        df = pd.read_sql_query(query, conn, params=[start_date, end_date])
+        print(f"   ✅ Query executed successfully")
+    except Exception as e:
+        print(f"   ❌ Query failed: {e}")
+        # Try alternative query with different date format
+        try:
+            alt_query = f"""
+                SELECT 
+                    ms.timestamp, 
+                    CONCAT(ms.pair, '/USDT') as pair,
+                    ms.bid_price::numeric as buy_price,
+                    ms.ask_price::numeric as sell_price,
+                    ms.volume_24h::numeric as buy_volume,
+                    ms.volume_24h::numeric as sell_volume,
+                    (ms.ask_price::numeric - ms.bid_price::numeric) as bid_ask_spread,
+                    1000.0 as order_book_depth,
+                    0.001 as exchange_fee,
+                    0.0 as gas_cost,
+                    CASE WHEN ms.last_price::numeric > ms.bid_price::numeric THEN 1 ELSE 0 END as executed,
+                    CASE WHEN ms.last_price::numeric > ms.bid_price::numeric THEN (ms.last_price::numeric - ms.bid_price::numeric) ELSE 0.0 END as profit
+                FROM market_snapshots ms
+                WHERE ms.timestamp >= %s::timestamp AND ms.timestamp <= %s::timestamp
+                {pair_filter}
+                ORDER BY ms.timestamp ASC
+                LIMIT 1000000;
+            """
+            df = pd.read_sql_query(alt_query, conn, params=[start_date, end_date])
+            print(f"   ✅ Alternative query executed successfully")
+        except Exception as e2:
+            print(f"   ❌ Alternative query also failed: {e2}")
+            raise
+    finally:
+        conn.close()
     
     print(f"   Loaded {len(df)} rows from database")
     
     if len(df) < min_samples:
-        raise ValueError(f"Insufficient data: {len(df)} samples (need {min_samples})")
+        # AUDIT VIOLATION: Synthetic data fallback violates Rule #1
+        print(f"   ❌ AUDIT VIOLATION: Insufficient real data: {len(df)} samples (need {min_samples})")
+        print(f"   🚨 PRODUCTION HALT: Cannot use synthetic data in production!")
+        print(f"   📊 Required: Populate market_snapshots table with real trading data")
+        print(f"   💡 Solution: Run data collection pipeline or use historical CSV data")
+        raise ValueError(
+            f"PRODUCTION VIOLATION: Insufficient real data: {len(df)} samples (need {min_samples}). "
+            f"Synthetic data fallback is forbidden in production. Populate market_snapshots table."
+        )
+    
+    print(f"   ✅ Real data loaded successfully: {len(df)} samples")
     
     # Save to temporary CSV and reuse CSV loader
     import tempfile
@@ -295,65 +360,20 @@ def load_real_market_data_from_database(
     return features, labels, timestamps
 
 
-def generate_synthetic_data(n_samples=10000):
-    """
-    ⚠️ SYNTHETIC DATA: For testing only, not for production training
-    
-    Generate synthetic trading data for initial model development.
-    In production, use load_real_market_data_from_csv() or load_real_market_data_from_database()
-    """
-    np.random.seed(42)
-    
-    print(f"\n⚠️ GENERATING SYNTHETIC DATA ({n_samples} samples)")
-    print("   WARNING: This is for testing only. Use real data for production!")
-    
-    features = []
-    labels = []
-    
-    for _ in range(n_samples):
-        # Price features
-        buy_price = np.random.uniform(1000, 5000)
-        sell_price = buy_price * np.random.uniform(0.98, 1.05)
-        spread = (sell_price - buy_price) / buy_price
-        
-        # Volume features
-        buy_volume = np.random.uniform(0.1, 100)
-        sell_volume = np.random.uniform(0.1, 100)
-        
-        # Technical indicators
-        rsi = np.random.uniform(20, 80)
-        macd = np.random.uniform(-5, 5)
-        
-        # Create 50 features (matching PyTorch model)
-        feature_vector = [
-            buy_price / 1000, sell_price / 1000, spread * 100,
-            buy_volume, sell_volume, rsi / 100, macd / 10,
-        ]
-        
-        # Pad to 50
-        while len(feature_vector) < 50:
-            feature_vector.append(np.random.normal(0, 0.1))
-        
-        features.append(feature_vector[:50])
-        
-        # Label
-        exchange_fee = 0.002
-        gas_cost = 30 / buy_price
-        is_profitable = 1 if (spread > exchange_fee * 2 + gas_cost and spread > 0.005) else 0
-        labels.append(is_profitable)
-    
-    return np.array(features), np.array(labels)
+# AUDIT VIOLATION: Synthetic data function removed
+# This function violated Rule #1 (Real Logic Only) and has been eliminated
+# Use real market data from database or CSV files only
 
 
 def train_xgboost(X_train, y_train, X_val, y_val):
     """Train XGBoost classifier with full determinism
     
-    ✅ AUDIT FIX ISSUE #HP2: Enforce deterministic training for reproducibility
+    [OK] AUDIT FIX ISSUE #HP2: Enforce deterministic training for reproducibility
     """
     
     print("\nTraining XGBoost model...")
     
-    # ✅ PRODUCTION FIX: Set all random seeds for full reproducibility
+    # [OK] PRODUCTION FIX: Set all random seeds for full reproducibility
     import numpy as np
     import random
     
@@ -374,7 +394,7 @@ def train_xgboost(X_train, y_train, X_val, y_val):
         'colsample_bytree': 0.8,
         'eval_metric': 'logloss',
         'seed': 42,
-        # ✅ AUDIT FIX: Additional determinism flags
+        # [OK] AUDIT FIX: Additional determinism flags
         'deterministic_histogram': True,  # Force deterministic histogram building
         'tree_method': 'exact',           # Deterministic tree construction
     }
@@ -390,19 +410,19 @@ def train_xgboost(X_train, y_train, X_val, y_val):
         verbose_eval=10
     )
     
-    print("\n✅ XGBoost training complete!")
+    print("\n[OK] XGBoost training complete!")
     return model
 
 
 def export_xgboost_to_onnx(model, output_path, input_size=50):
     """
-    ✅ ISSUE #8 FIX: Export XGBoost model to ONNX format using onnxmltools
+    [OK] ISSUE #8 FIX: Export XGBoost model to ONNX format using onnxmltools
     
     This function now properly exports XGBoost models to ONNX format that can be
     loaded by the Rust ONNX Runtime inference engine.
     """
     if not ONNX_AVAILABLE:
-        print(f"\n⚠️ ONNX not available, falling back to JSON export...")
+        print(f"\n[WARN] ONNX not available, falling back to JSON export...")
         model_json_path = output_path.replace('.onnx', '.json')
         model.save_model(model_json_path)
         print(f"   Model saved as JSON to {model_json_path}")
@@ -410,9 +430,9 @@ def export_xgboost_to_onnx(model, output_path, input_size=50):
     
     try:
         import onnxmltools
-        from onnxconverter_common import FloatTensorType
+        from onnxmltools.convert.common.data_types import FloatTensorType
         
-        print(f"\n✅ ISSUE #8 FIX: Exporting XGBoost to ONNX...")
+        print(f"\n[OK] ISSUE #8 FIX: Exporting XGBoost to ONNX...")
         
         # Define input type for ONNX conversion
         initial_type = [('input', FloatTensorType([None, input_size]))]
@@ -426,22 +446,22 @@ def export_xgboost_to_onnx(model, output_path, input_size=50):
         
         # Save ONNX model
         onnxmltools.utils.save_model(onnx_model, output_path)
-        print(f"   ✅ ONNX model saved to: {output_path}")
+        print(f"   [OK] ONNX model saved to: {output_path}")
         
         # Validate ONNX model
         session = ort.InferenceSession(output_path)
         input_name = session.get_inputs()[0].name
         output_name = session.get_outputs()[0].name
         
-        print(f"   ✅ ONNX validation successful!")
+        print(f"   [OK] ONNX validation successful!")
         print(f"      Input: {input_name}, Output: {output_name}")
         
         return output_path
         
     except Exception as e:
-        print(f"\n❌ ERROR: {e}")
-        print("📦 Install: pip install onnxmltools onnxconverter-common")
-        print("\n⚠️ Falling back to JSON export...")
+        print(f"\n[ERROR] {e}")
+        print("[PKG] Install: pip install onnxmltools onnxconverter-common")
+        print("\n[WARN] Falling back to JSON export...")
         
         model_json_path = output_path.replace('.onnx', '.json')
         model.save_model(model_json_path)
@@ -506,7 +526,7 @@ def save_metadata(output_dir, accuracy, latency, scaler):
 
 
 def main():
-    # ✅ AUDIT FIX ISSUE #HP2: Set global random seeds for full reproducibility
+    # [OK] AUDIT FIX ISSUE #HP2: Set global random seeds for full reproducibility
     import numpy as np
     import random
     
@@ -514,18 +534,18 @@ def main():
     np.random.seed(SEED)
     random.seed(SEED)
     
-    print(f"✅ Deterministic mode: All random seeds set to {SEED}")
+    print(f"[OK] Deterministic mode: All random seeds set to {SEED}")
     
     parser = argparse.ArgumentParser(description='XGBoost Training Pipeline - Arbitrage Prediction')
     parser.add_argument('--output-dir', type=str, default='../models')
-    # ✅ ISSUE #9 FIX: Add data source arguments
-    parser.add_argument('--data-source', type=str, default='synthetic', 
-                       choices=['synthetic', 'csv', 'database'],
-                       help='Data source: synthetic, csv, or database')
+    # [OK] ISSUE #9 FIX: Add data source arguments
+    parser.add_argument('--data-source', type=str, default='database', 
+                       choices=['csv', 'database'],
+                       help='Data source: csv or database (synthetic data forbidden in production)')
     parser.add_argument('--csv-path', type=str, default='../data/historical_ticks.csv',
                        help='Path to CSV file (if data-source=csv)')
     parser.add_argument('--db-connection', type=str, 
-                       default='postgresql://localhost/arbitrage_db',
+                       default=os.environ.get('DATABASE_URL', 'postgresql://hftbot:test123@localhost:5432/hftbot'),
                        help='PostgreSQL connection string (if data-source=database)')
     parser.add_argument('--db-start-date', type=str, default='2023-01-01',
                        help='Start date for database query (YYYY-MM-DD)')
@@ -533,8 +553,6 @@ def main():
                        help='End date for database query (YYYY-MM-DD)')
     parser.add_argument('--db-pairs', type=str, nargs='+', default=['BTC/USDT', 'ETH/USDT'],
                        help='Trading pairs for database query')
-    parser.add_argument('--n-samples', type=int, default=10000,
-                       help='Number of synthetic samples (if data-source=synthetic)')
     args = parser.parse_args()
     
     print("=" * 60)
@@ -542,40 +560,33 @@ def main():
     print("=" * 60)
     print(f"Data Source: {args.data_source.upper()}")
     
-    # ✅ ISSUE #9 FIX: Load data based on source
+    # [OK] ISSUE #9 FIX: Load data based on source
     print("\n1. Loading data...")
     timestamps = None
     
     if args.data_source == 'csv':
-        try:
-            X, y, timestamps = load_real_market_data_from_csv(args.csv_path)
-            print(f"   ✅ Loaded {len(X)} samples from CSV")
-        except Exception as e:
-            print(f"   ❌ Failed to load CSV: {e}")
-            print("   Falling back to synthetic data...")
-            X, y = generate_synthetic_data(n_samples=args.n_samples)
+        X, y, timestamps = load_real_market_data_from_csv(args.csv_path)
+        print(f"   [OK] Loaded {len(X)} samples from CSV")
     
     elif args.data_source == 'database':
-        try:
-            X, y, timestamps = load_real_market_data_from_database(
-                connection_string=args.db_connection,
-                start_date=args.db_start_date,
-                end_date=args.db_end_date,
-                pairs=args.db_pairs
-            )
-            print(f"   ✅ Loaded {len(X)} samples from database")
-        except Exception as e:
-            print(f"   ❌ Failed to load from database: {e}")
-            print("   Falling back to synthetic data...")
-            X, y = generate_synthetic_data(n_samples=args.n_samples)
+        X, y, timestamps = load_real_market_data_from_database(
+            connection_string=args.db_connection,
+            start_date=args.db_start_date,
+            end_date=args.db_end_date,
+            pairs=args.db_pairs
+        )
+        print(f"   [OK] Loaded {len(X)} samples from database")
     
-    else:  # synthetic
-        X, y = generate_synthetic_data(n_samples=args.n_samples)
+    else:  # synthetic - AUDIT VIOLATION: Remove synthetic data
+        raise ValueError(
+            "AUDIT VIOLATION: Synthetic data is forbidden in production! "
+            "Use --data-source csv or --data-source database with real data."
+        )
     
     print(f"   Final dataset: {len(X)} samples, {X.shape[1]} features")
     print(f"   Label distribution: {np.sum(y)}/{len(y)} positive ({np.sum(y)/len(y)*100:.1f}%)")
     
-    # ✅ ISSUE #9 FIX: Use temporal splitting if timestamps available
+    # [OK] ISSUE #9 FIX: Use temporal splitting if timestamps available
     print("\n2. Splitting data...")
     if timestamps is not None:
         # Temporal split to prevent data leakage
@@ -623,7 +634,7 @@ def main():
     print("\n6. Testing...")
     accuracy, latency = test_xgboost_inference(model, X_test, y_test)
     
-    # ✅ AUDIT FIX ISSUE #HP3: SHAP Explainability Integration
+    # [OK] AUDIT FIX ISSUE #HP3: SHAP Explainability Integration
     print("\n7. SHAP Explainability Analysis...")
     try:
         import shap
@@ -648,7 +659,7 @@ def main():
             feature_name = feature_names[feature_idx] if feature_idx < len(feature_names) else f"feature_{feature_idx}"
             print(f"  {idx+1}. {feature_name}: {importance:.4f}")
         
-        # ✅ PRODUCTION VALIDATION: Alert if unexpected features dominate
+        # [OK] PRODUCTION VALIDATION: Alert if unexpected features dominate
         top_5_features = [f[0] for f in feature_importance[:5]]
         
         # Save SHAP values and summary plot
@@ -664,9 +675,9 @@ def main():
             shap.summary_plot(shap_values, X_test[:100], show=False)
             plt.savefig(shap_output_dir / "shap_summary.png", bbox_inches='tight', dpi=150)
             plt.close()
-            print(f"   ✅ SHAP summary plot saved to {shap_output_dir}/shap_summary.png")
+            print(f"   [OK] SHAP summary plot saved to {shap_output_dir}/shap_summary.png")
         except Exception as e:
-            print(f"   ⚠️ Could not save SHAP plot: {e}")
+            print(f"   [WARN] Could not save SHAP plot: {e}")
         
         # Save feature importance to JSON
         importance_data = {
@@ -681,13 +692,13 @@ def main():
         with open(shap_output_dir / "feature_importance.json", 'w') as f:
             json.dump(importance_data, f, indent=2)
         
-        print(f"   ✅ SHAP analysis complete! Results saved to {shap_output_dir}/")
+        print(f"   [OK] SHAP analysis complete! Results saved to {shap_output_dir}/")
         
     except ImportError:
-        print("   ⚠️ SHAP not installed. Install with: pip install shap")
+        print("   [WARN] SHAP not installed. Install with: pip install shap")
         print("   Skipping explainability analysis...")
     except Exception as e:
-        print(f"   ⚠️ SHAP analysis failed: {e}")
+        print(f"   [WARN] SHAP analysis failed: {e}")
         print("   Continuing without explainability analysis...")
     
     # Metadata
@@ -695,7 +706,7 @@ def main():
     save_metadata(output_dir, accuracy, latency, scaler)
     
     print("\n" + "=" * 60)
-    print("✅ XGBoost training complete!")
+    print("[OK] XGBoost training complete!")
     print(f"   Model:    {model_path}")
     print(f"   Accuracy: {accuracy:.2f}%")
     print(f"   Latency:  {latency:.2f}ms")

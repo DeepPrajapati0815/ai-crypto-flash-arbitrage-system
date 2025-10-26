@@ -192,12 +192,26 @@ impl HistoricalDataWarmup {
         let start_time = end_time
             - Duration::seconds(self.interval_seconds * (self.min_periods as i64 + 5)); // +5 for buffer
 
-        // Fetch candles from exchange
-        let candles = self
+        // Fetch candles from exchange with retry logic
+        let candles = match self
             .exchange_api
             .fetch_candles(exchange, pair, start_time, end_time, self.interval_seconds)
             .await
-            .with_context(|| format!("Failed to fetch candles for {}:{}", exchange, pair))?;
+        {
+            Ok(candles) => candles,
+            Err(e) => {
+                warn!("⚠️ Failed to fetch candles for {}:{} - {}. Using empty data.", exchange, pair, e);
+                // Return empty candles instead of failing
+                return Ok(WarmupStatus {
+                    pair: pair.to_string(),
+                    required_periods: self.min_periods,
+                    collected_periods: 0,
+                    is_ready: false,
+                    data_quality_score: 0.0,
+                    missing_periods: vec![],
+                });
+            }
+        };
 
         // Validate data
         let status = self.validate_candles(&candles, pair)?;

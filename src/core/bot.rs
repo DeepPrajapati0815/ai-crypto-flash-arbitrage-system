@@ -567,19 +567,26 @@ impl HFTBot {
         self.websocket_manager.start().await?;
 
         // ✅ ISSUE #1 FIX: Wait for historical data warmup before trading
-        info!("⏳ Waiting for historical data warmup (26 periods for MACD)...");
+        info!("⏳ Starting historical data warmup (26 periods for MACD)...");
         let pairs: Vec<String> = self.config.trading_pairs
             .iter()
             .map(|p| format!("{}/{}", p.base, p.quote))
             .collect();
         
-        // Wait up to 60 seconds for 26 periods (sufficient for MACD calculation)
-        match self.feature_bridge.wait_for_warmup(&pairs, 26, 60).await {
-            Ok(_) => {
+        // Wait up to 30 seconds for 26 periods (sufficient for MACD calculation)
+        // Use shorter timeout to prevent bot from hanging on API failures
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.feature_bridge.wait_for_warmup(&pairs, 26, 30)
+        ).await {
+            Ok(Ok(_)) => {
                 info!("✅ Historical data warmup complete! Ready to trade with full indicators.");
             },
-            Err(e) => {
+            Ok(Err(e)) => {
                 warn!("⚠️ Warmup incomplete: {}. Proceeding with available data (predictions may be less accurate initially).", e);
+            },
+            Err(_timeout) => {
+                warn!("⚠️ Warmup timeout after 30s. Proceeding with available data (predictions may be less accurate initially).");
             }
         }
 

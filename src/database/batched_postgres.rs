@@ -161,7 +161,7 @@ impl BatchedPostgresManager {
             )
             .bind(&metric.id)
             .bind(&metric.metric_name)
-            .bind(&metric.value.to_string())
+            .bind(&metric.value.to_string())  // Convert Decimal to string for PostgreSQL
             .bind(&metric.unit)
             .bind(&metric.timestamp)
             .execute(&mut *tx)

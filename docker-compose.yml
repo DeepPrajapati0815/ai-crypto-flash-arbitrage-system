@@ -15,7 +15,7 @@ services:
       - RUST_BACKTRACE=1
       
       # Database connections
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hftbot}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD:-test123}@postgres:5432/${POSTGRES_DB:-hftbot}
       - REDIS_URL=redis://redis:6379
       
       # Monitoring
@@ -49,6 +49,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      db-migrator:
+        condition: service_completed_successfully
     
     ports:
       - "${METRICS_PORT:-8080}:8080"
@@ -92,6 +94,31 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    
+    networks:
+      - hft-network
+
+  # ===========================================================================
+  # Database Migration Runner
+  # ===========================================================================
+  db-migrator:
+    image: postgres:16
+    container_name: hft-db-migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hftbot}
+    
+    volumes:
+      - ./migrations:/app/migrations:ro
+      - ./scripts:/app/scripts
+    
+    command: >
+      bash -c "
+        bash /app/scripts/run_migrations.sh
+      "
     
     networks:
       - hft-network

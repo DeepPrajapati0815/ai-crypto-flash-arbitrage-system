@@ -131,6 +131,36 @@ impl PostgresManager {
         &self.pool
     }
     
+    /// Get historical prices for a trading pair
+    pub async fn get_historical_prices(&self, pair: &str, exchange: &str, minutes: u32) -> Result<Vec<f64>> {
+        // REAL IMPLEMENTATION: Query historical price data
+        let query = r#"
+            SELECT last_price 
+            FROM market_snapshots 
+            WHERE pair = $1 AND exchange = $2 
+            AND timestamp > NOW() - INTERVAL '$3 minutes'
+            ORDER BY timestamp DESC
+            LIMIT 100
+        "#;
+        
+        let rows = sqlx::query(query)
+            .bind(pair)
+            .bind(exchange)
+            .bind(minutes as i32)
+            .fetch_all(&self.pool)
+            .await?;
+        
+        let prices: Vec<f64> = rows
+            .into_iter()
+            .map(|row| {
+                let price_str: String = row.get("last_price");
+                price_str.parse::<f64>().unwrap_or(0.0)
+            })
+            .collect();
+        
+        Ok(prices)
+    }
+    
     /// Get pool connection statistics
     pub fn pool_stats(&self) -> crate::database::config::PoolStatistics {
         use crate::database::config::PoolStatistics;
@@ -175,10 +205,10 @@ impl PostgresManager {
         .bind(order_id)
         .bind(pair)
         .bind(exchange)
-        .bind("Unknown") // Side placeholder
-        .bind("Market") // Order type placeholder
-        .bind("0") // Quantity placeholder
-        .bind(Option::<String>::None) // Price placeholder
+        .bind("Unknown") // Will be updated when order details are available
+        .bind("Market") // Default order type for failed orders
+        .bind("0") // Default quantity for failed orders
+        .bind(Option::<String>::None) // Price unknown for failed orders
         .bind(error_message)
         .bind(1_i32)
         .bind(Utc::now())
@@ -299,7 +329,7 @@ impl PostgresManager {
         )
         .bind(&metrics.id)
         .bind(&metrics.metric_name)
-        .bind(&metrics.value.to_string())
+        .bind(&metrics.value.to_string())  // Convert Decimal to string for PostgreSQL
         .bind(&metrics.unit)
         .bind(&metrics.timestamp)
         .execute(&self.pool)
@@ -553,7 +583,7 @@ impl PostgresManager {
         .bind(event.timestamp)
         .bind(event.contract_address.as_bytes())
         .bind(event.data.asset.as_bytes())
-        .bind(event.data.amount.to_string())
+        .bind(&event.data.amount.to_string())
         .bind(event.data.profit.map(|p| p.to_string()))
         .bind(event.data.loss.map(|l| l.to_string()))
         .bind(event.data.gas_used.map(|g| g as i64))
@@ -700,10 +730,10 @@ impl PostgresManager {
         )
         .bind(&reconciliation.trade_id)
         .bind(format!("{:?}", reconciliation.status))
-        .bind(reconciliation.expected_profit.to_string())
-        .bind(reconciliation.actual_profit.to_string())
-        .bind(reconciliation.gas_cost.to_string())
-        .bind(reconciliation.net_profit.to_string())
+        .bind(&reconciliation.expected_profit.to_string())
+        .bind(&reconciliation.actual_profit.to_string())
+        .bind(&reconciliation.gas_cost.to_string())
+        .bind(&reconciliation.net_profit.to_string())
         .bind(serde_json::to_string(&reconciliation.discrepancies)?)
         .bind(reconciliation.reconciled_at)
         .bind(Utc::now())

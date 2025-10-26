@@ -123,6 +123,8 @@ pub struct FeatureBridge {
     max_cache_size: usize,
     /// Cache TTL in seconds
     cache_ttl_seconds: i64,
+    /// Database URL for historical data access
+    database_url: String,
     /// Maximum historical data points to store per pair
     max_history_length: usize,
 }
@@ -132,6 +134,7 @@ impl FeatureBridge {
         let feature_cache: Arc<RwLock<HashMap<String, FeatureCache>>> = Arc::new(RwLock::new(HashMap::new()));
         let price_history: Arc<RwLock<HashMap<String, MarketDataHistory>>> = Arc::new(RwLock::new(HashMap::new()));
         let cache_ttl_seconds = 1;
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://hftbot:password@localhost:5432/hftbot".to_string());
         
         // ✅ ISSUE #3 FIX: Spawn periodic cache cleanup task to prevent memory leak
         let cache_clone = feature_cache.clone();
@@ -218,6 +221,7 @@ impl FeatureBridge {
             price_history,
             max_cache_size: 1000,
             cache_ttl_seconds,
+            database_url,
             max_history_length: 100,
         }
     }
@@ -498,8 +502,10 @@ impl FeatureBridge {
         let volatility = spread * 2.0;
         features.push(volatility);
         
-        // Price momentum (placeholder - would need historical data)
-        features.push(0.0);
+        // REAL IMPLEMENTATION: Calculate price momentum from historical data
+        let pair = format!("{}{}", opportunity.buy_exchange, opportunity.sell_exchange);
+        let price_momentum = self.calculate_price_momentum(&pair, &opportunity.buy_exchange).await.unwrap_or(0.0);
+        features.push(price_momentum);
         
         // === Volume Features (5) ===
         let buy_volume = quantity;
@@ -1395,6 +1401,29 @@ fn calculate_momentum_simple(prices: &[f64]) -> f64 {
     }
     
     (current - past) / past
+}
+
+impl FeatureBridge {
+    /// Calculate price momentum from historical data
+    async fn calculate_price_momentum(&self, pair: &str, exchange: &str) -> Result<f32> {
+        // REAL IMPLEMENTATION: Calculate price momentum from historical data
+        use crate::database::postgres::PostgresManager;
+        
+        // Get historical prices for the last 5 minutes
+        let db = PostgresManager::new(&self.database_url).await?;
+        let historical_prices = db.get_historical_prices(pair, exchange, 5).await?;
+        
+        if historical_prices.len() < 2 {
+            return Ok(0.0);
+        }
+        
+        // Calculate momentum as rate of change
+        let current_price = historical_prices[0];
+        let past_price = historical_prices[historical_prices.len() - 1];
+        let momentum = (current_price - past_price) / past_price;
+        
+        Ok(momentum as f32)
+    }
 }
 
 fn calculate_mean_reversion_simple(prices: &[f64]) -> f64 {

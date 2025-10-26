@@ -48,6 +48,31 @@ services:
       - hft-network
 
   # ===========================================================================
+  # Database Migration Runner
+  # ===========================================================================
+  db-migrator:
+    image: postgres:16
+    container_name: hft-db-migrator-local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD:-test123}@postgres:5432/${POSTGRES_DB:-hftbot}
+    
+    volumes:
+      - ./migrations:/app/migrations:ro
+      - ./scripts:/app/scripts
+    
+    command: >
+      bash -c "
+        bash /app/scripts/run_migrations.sh
+      "
+    
+    networks:
+      - hft-network
+
+  # ===========================================================================
   # Redis Cache
   # ===========================================================================
   redis:
@@ -99,8 +124,10 @@ services:
     
     command: >
       sh -c "
+        echo '🌱 Seeding market data...' &&
+        python scripts/seed_market_data.py &&
         echo '🤖 Training ML models...' &&
-        python scripts/train_xgboost_model.py &&
+        python scripts/train_xgboost_model.py --data-source database &&
         echo '✅ ML model training complete!' &&
         echo '📦 ONNX model saved to: ml_training/models/trading_model.onnx'
       "
@@ -124,7 +151,7 @@ services:
       - RUST_BACKTRACE=1
       
       # Database connections
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hftbot}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD:-test123}@postgres:5432/${POSTGRES_DB:-hftbot}
       - REDIS_URL=redis://redis:6379
       
       # Monitoring
@@ -158,6 +185,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      db-migrator:
+        condition: service_completed_successfully
       ml-trainer:
         condition: service_completed_successfully
     

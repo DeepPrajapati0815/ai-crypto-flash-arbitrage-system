@@ -10,20 +10,44 @@ use tokio::sync::{RwLock, mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tracing::{info, error, debug, warn};
 use url::Url;
+use std::time::{Duration, Instant};
+use tokio::time::sleep;
+use crate::market_data::websocket_circuit_breaker::{WebSocketCircuitBreaker, WebSocketCircuitBreakerConfig};
 
 /// WebSocket manager for market data streaming
 pub struct WebSocketManager {
     config: Arc<Config>,
     connections: Arc<RwLock<Vec<tokio::task::JoinHandle<()>>>>,
     ticker_sender: Arc<RwLock<Option<mpsc::Sender<Ticker>>>>,
+    binance_circuit_breaker: Arc<WebSocketCircuitBreaker>,
+    okx_circuit_breaker: Arc<WebSocketCircuitBreaker>,
 }
 
 impl WebSocketManager {
     pub async fn new(config: &Config) -> Result<Self> {
+        // Create circuit breakers with production-ready configuration
+        let binance_config = WebSocketCircuitBreakerConfig {
+            max_failures: 5,
+            timeout: Duration::from_secs(30),
+            success_threshold: 3,
+            max_open_duration: Duration::from_secs(300), // 5 minutes
+            min_retry_interval: Duration::from_secs(10),
+        };
+        
+        let okx_config = WebSocketCircuitBreakerConfig {
+            max_failures: 5,
+            timeout: Duration::from_secs(30),
+            success_threshold: 3,
+            max_open_duration: Duration::from_secs(300), // 5 minutes
+            min_retry_interval: Duration::from_secs(10),
+        };
+        
         Ok(Self {
             config: Arc::new(config.clone()),
             connections: Arc::new(RwLock::new(Vec::new())),
             ticker_sender: Arc::new(RwLock::new(None)),
+            binance_circuit_breaker: Arc::new(WebSocketCircuitBreaker::with_config("binance", binance_config)),
+            okx_circuit_breaker: Arc::new(WebSocketCircuitBreaker::with_config("okx", okx_config)),
         })
     }
 
@@ -50,7 +74,7 @@ impl WebSocketManager {
         Ok(())
     }
 
-    /// Connect to Binance WebSocket with real production implementation
+    /// Connect to Binance WebSocket with enhanced TLS resilience and connection management
     async fn connect_binance(&self) -> Result<()> {
         let exchange = self.config.exchanges.get("binance").unwrap();
         
@@ -66,71 +90,146 @@ impl WebSocketManager {
         let url = format!("{}/{}", exchange.websocket_url, streams);
         info!("Connecting to Binance WebSocket: {}", url);
         
-        let ws_url = Url::parse(&url)?;
-        let (ws_stream, _) = connect_async(ws_url).await?;
-        let (mut write, mut read) = ws_stream.split();
-        
-        // Spawn connection handler with real message processing and reconnection
+        // Spawn connection handler with circuit breaker protection
         let config = self.config.clone();
         let ticker_sender_opt = self.ticker_sender.read().await.clone();
+        let circuit_breaker = self.binance_circuit_breaker.clone();
         let handle = tokio::spawn(async move {
             let mut reconnect_attempts = 0;
-            const MAX_RECONNECT_ATTEMPTS: u32 = 5;
+            const MAX_RECONNECT_ATTEMPTS: u32 = 10; // Increased from 5 to 10
+            const MAX_BACKOFF_SECONDS: u64 = 300; // 5 minutes max backoff
+            let mut last_successful_connection = Instant::now();
             
             loop {
-                while let Some(msg) = read.next().await {
-                    match msg {
-                        Ok(Message::Text(text)) => {
-                            if let Err(e) = Self::handle_binance_message(&config, &text, ticker_sender_opt.as_ref()).await {
-                                error!("Error handling Binance message: {}", e);
+                // Check circuit breaker before attempting connection
+                if !circuit_breaker.can_attempt_connection().await {
+                    let delay = circuit_breaker.get_retry_delay().await;
+                    warn!("Binance WebSocket circuit breaker blocking connection, waiting {:?}", delay);
+                    sleep(delay).await;
+                    continue;
+                }
+                
+                // Record attempt
+                circuit_breaker.record_attempt().await;
+                
+                // Enhanced connection with TLS error handling
+                match Self::establish_binance_connection(&url).await {
+                    Ok(ws_stream) => {
+                        let (mut write, mut read) = ws_stream.split();
+                        info!("✅ Binance WebSocket connected successfully");
+                        circuit_breaker.record_success().await;
+                        reconnect_attempts = 0; // Reset on successful connection
+                        last_successful_connection = Instant::now();
+                        
+                        // Process messages with enhanced error handling
+                        let mut consecutive_errors = 0;
+                        const MAX_CONSECUTIVE_ERRORS: u32 = 5;
+                        
+                        while let Some(msg) = read.next().await {
+                            match msg {
+                                Ok(Message::Text(text)) => {
+                                    if let Err(e) = Self::handle_binance_message(&config, &text, ticker_sender_opt.as_ref()).await {
+                                        error!("Error handling Binance message: {}", e);
+                                        consecutive_errors += 1;
+                                        
+                                        // If too many consecutive errors, break and reconnect
+                                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                            error!("Too many consecutive message errors ({}), reconnecting...", consecutive_errors);
+                                            break;
+                                        }
+                                    } else {
+                                        consecutive_errors = 0; // Reset on successful message
+                                    }
+                                }
+                                Ok(Message::Close(_)) => {
+                                    warn!("Binance WebSocket connection closed by server");
+                                    break;
+                                }
+                                Ok(Message::Ping(data)) => {
+                                    if let Err(e) = write.send(Message::Pong(data)).await {
+                                        error!("Failed to send pong: {}", e);
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Binance WebSocket error: {}", e);
+                                    
+                                    // Check if this is a TLS error
+                                    if e.to_string().contains("TLS") || e.to_string().contains("EOF") {
+                                        warn!("TLS connection error detected, will retry with backoff");
+                                    }
+                                    break;
+                                }
+                                _ => {}
                             }
                         }
-                        Ok(Message::Close(_)) => {
-                            warn!("Binance WebSocket connection closed");
-                            break;
-                        }
-                        Ok(Message::Ping(data)) => {
-                            if let Err(e) = write.send(Message::Pong(data)).await {
-                                error!("Failed to send pong: {}", e);
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            error!("Binance WebSocket error: {}", e);
-                            break;
-                        }
-                        _ => {}
+                    }
+                    Err(e) => {
+                        error!("Failed to establish Binance WebSocket connection: {}", e);
+                        circuit_breaker.record_failure().await;
                     }
                 }
                 
-                // Real reconnection logic for production reliability
+                // Enhanced reconnection logic with circuit breaker
                 if reconnect_attempts < MAX_RECONNECT_ATTEMPTS {
                     reconnect_attempts += 1;
-                    let delay = std::time::Duration::from_secs(2_u64.pow(reconnect_attempts));
-                    warn!("Attempting to reconnect to Binance WebSocket in {:?} (attempt {})", delay, reconnect_attempts);
-                    tokio::time::sleep(delay).await;
                     
-                    // Reconnect with exponential backoff
-                    if let Ok(new_ws_url) = Url::parse(&url) {
-                        if let Ok((new_ws_stream, _)) = connect_async(new_ws_url).await {
-                            let (new_write, new_read) = new_ws_stream.split();
-                            write = new_write;
-                            read = new_read;
-                            info!("Successfully reconnected to Binance WebSocket");
-                            continue;
-                        }
-                    }
+                    // Calculate backoff with jitter and max cap
+                    let base_delay = std::cmp::min(2_u64.pow(reconnect_attempts), MAX_BACKOFF_SECONDS);
+                    let jitter = if base_delay >= 4 {
+                        fastrand::u64(0..base_delay / 4) // Add 25% jitter
+                    } else {
+                        0 // No jitter for very small delays
+                    };
+                    let delay = Duration::from_secs(base_delay + jitter);
+                    
+                    warn!("Attempting to reconnect to Binance WebSocket in {:?} (attempt {}/{})", 
+                          delay, reconnect_attempts, MAX_RECONNECT_ATTEMPTS);
+                    
+                    sleep(delay).await;
                 } else {
-                    error!("Max reconnection attempts reached for Binance WebSocket");
-                    break;
+                    // Check if we've been down too long (circuit breaker)
+                    let downtime = last_successful_connection.elapsed();
+                    if downtime > Duration::from_secs(1800) { // 30 minutes
+                        error!("Binance WebSocket has been down for {:?}, giving up permanently", downtime);
+                        break;
+                    }
+                    
+                    // Reset attempts after a longer delay
+                    warn!("Max reconnection attempts reached, waiting 5 minutes before retry...");
+                    sleep(Duration::from_secs(300)).await;
+                    reconnect_attempts = 0;
                 }
             }
+            
+            error!("❌ Binance WebSocket connection permanently failed");
         });
         
         let mut connections = self.connections.write().await;
         connections.push(handle);
         
         Ok(())
+    }
+    
+    /// Establish Binance WebSocket connection with enhanced TLS handling
+    async fn establish_binance_connection(url: &str) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>> {
+        let ws_url = Url::parse(url)?;
+        
+        // Add connection timeout
+        let connect_future = connect_async(ws_url);
+        let timeout_duration = Duration::from_secs(30);
+        
+        match tokio::time::timeout(timeout_duration, connect_future).await {
+            Ok(Ok((ws_stream, _))) => {
+                Ok(ws_stream)
+            }
+            Ok(Err(e)) => {
+                Err(anyhow::anyhow!("WebSocket connection failed: {}", e))
+            }
+            Err(_) => {
+                Err(anyhow::anyhow!("WebSocket connection timeout after {:?}", timeout_duration))
+            }
+        }
     }
 
     /// Handle incoming Binance WebSocket messages
@@ -230,111 +329,171 @@ impl WebSocketManager {
     }
 
 
-    /// Connect to OKX WebSocket with real production implementation
+    /// Connect to OKX WebSocket with enhanced TLS resilience and connection management
     async fn connect_okx(&self) -> Result<()> {
         let exchange = self.config.exchanges.get("okx").unwrap();
         let url = format!("{}/public", exchange.websocket_url);
         
         info!("Connecting to OKX WebSocket: {}", url);
         
-        let (ws_stream, _) = connect_async(Url::parse(&url)?).await?;
-        let (mut write, mut read) = ws_stream.split();
-
-        // Real OKX subscription for all configured trading pairs
-        let subscribe_msg = serde_json::json!({
-            "op": "subscribe",
-            "args": self.config.trading_pairs.iter().map(|pair| {
-                serde_json::json!({"channel": "tickers", "instId": pair.symbol()})
-            }).collect::<Vec<_>>()
-        });
-
-        // Send subscription with real error handling
-        if let Err(e) = write.send(Message::Text(subscribe_msg.to_string())).await {
-            error!("Failed to send OKX subscription: {}", e);
-            return Err(e.into());
-        }
-
-        // Spawn connection handler with real reconnection logic
+        // Spawn connection handler with circuit breaker protection
         let config = self.config.clone();
-        let ticker_sender_arc = self.ticker_sender.clone(); // ✅ PRODUCTION FIX: Clone Arc for task
+        let ticker_sender_arc = self.ticker_sender.clone();
+        let circuit_breaker = self.okx_circuit_breaker.clone();
         let handle = tokio::spawn(async move {
             let mut reconnect_attempts = 0;
-            const MAX_RECONNECT_ATTEMPTS: u32 = 5;
+            const MAX_RECONNECT_ATTEMPTS: u32 = 10; // Increased from 5 to 10
+            const MAX_BACKOFF_SECONDS: u64 = 300; // 5 minutes max backoff
+            let mut last_successful_connection = Instant::now();
             
             loop {
-                while let Some(msg) = read.next().await {
-                    match msg {
-                        Ok(Message::Text(text)) => {
-                            if let Ok(data) = serde_json::from_str::<Value>(&text) {
-                                // PRODUCTION FIX: Acquire read lock and pass ticker_sender
-                                let ticker_sender_guard = ticker_sender_arc.read().await;
-                                let ticker_sender_ref = ticker_sender_guard.as_ref();
-                                Self::handle_okx_message(data, ticker_sender_ref).await;
-                            } else {
-                                error!("Failed to parse OKX message: {}", text);
-                            }
-                        },
-                        Ok(Message::Binary(_)) => {
-                            debug!("OKX binary message received");
-                        },
-                        Ok(Message::Close(_)) => {
-                            warn!("OKX WebSocket connection closed");
+                // Check circuit breaker before attempting connection
+                if !circuit_breaker.can_attempt_connection().await {
+                    let delay = circuit_breaker.get_retry_delay().await;
+                    warn!("OKX WebSocket circuit breaker blocking connection, waiting {:?}", delay);
+                    sleep(delay).await;
+                    continue;
+                }
+                
+                // Record attempt
+                circuit_breaker.record_attempt().await;
+                
+                // Enhanced connection with TLS error handling
+                match Self::establish_okx_connection(&url).await {
+                    Ok(ws_stream) => {
+                        let (mut write, mut read) = ws_stream.split();
+                        info!("✅ OKX WebSocket connected successfully");
+                        circuit_breaker.record_success().await;
+                        reconnect_attempts = 0; // Reset on successful connection
+                        last_successful_connection = Instant::now();
+                        
+                        // Send subscription with enhanced error handling
+                        let subscribe_msg = serde_json::json!({
+                            "op": "subscribe",
+                            "args": config.trading_pairs.iter().map(|pair| {
+                                serde_json::json!({"channel": "tickers", "instId": pair.symbol()})
+                            }).collect::<Vec<_>>()
+                        });
+                        
+                        if let Err(e) = write.send(Message::Text(subscribe_msg.to_string())).await {
+                            error!("Failed to send OKX subscription: {}", e);
                             break;
-                        },
-                        Ok(Message::Ping(data)) => {
-                            if let Err(e) = write.send(Message::Pong(data)).await {
-                                error!("Failed to send pong: {}", e);
-                                break;
+                        }
+                        
+                        // Process messages with enhanced error handling
+                        let mut consecutive_errors = 0;
+                        const MAX_CONSECUTIVE_ERRORS: u32 = 5;
+                        
+                        while let Some(msg) = read.next().await {
+                            match msg {
+                                Ok(Message::Text(text)) => {
+                                    if let Ok(data) = serde_json::from_str::<Value>(&text) {
+                                        // Acquire read lock and pass ticker_sender
+                                        let ticker_sender_guard = ticker_sender_arc.read().await;
+                                        let ticker_sender_ref = ticker_sender_guard.as_ref();
+                                        Self::handle_okx_message(data, ticker_sender_ref).await;
+                                        consecutive_errors = 0; // Reset on successful message
+                                    } else {
+                                        error!("Failed to parse OKX message: {}", text);
+                                        consecutive_errors += 1;
+                                        
+                                        // If too many consecutive errors, break and reconnect
+                                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                            error!("Too many consecutive message errors ({}), reconnecting...", consecutive_errors);
+                                            break;
+                                        }
+                                    }
+                                },
+                                Ok(Message::Binary(_)) => {
+                                    debug!("OKX binary message received");
+                                },
+                                Ok(Message::Close(_)) => {
+                                    warn!("OKX WebSocket connection closed by server");
+                                    break;
+                                },
+                                Ok(Message::Ping(data)) => {
+                                    if let Err(e) = write.send(Message::Pong(data)).await {
+                                        error!("Failed to send pong: {}", e);
+                                        break;
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("OKX WebSocket error: {}", e);
+                                    
+                                    // Check if this is a TLS error
+                                    if e.to_string().contains("TLS") || e.to_string().contains("EOF") {
+                                        warn!("TLS connection error detected, will retry with backoff");
+                                    }
+                                    break;
+                                },
+                                _ => {}
                             }
-                        },
-                        Err(e) => {
-                            error!("OKX WebSocket error: {}", e);
-                            break;
-                        },
-                        _ => {}
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to establish OKX WebSocket connection: {}", e);
+                        circuit_breaker.record_failure().await;
                     }
                 }
                 
-                // Real reconnection logic for production reliability
+                // Enhanced reconnection logic with circuit breaker
                 if reconnect_attempts < MAX_RECONNECT_ATTEMPTS {
                     reconnect_attempts += 1;
-                    let delay = std::time::Duration::from_secs(2_u64.pow(reconnect_attempts));
-                    warn!("Attempting to reconnect to OKX WebSocket in {:?} (attempt {})", delay, reconnect_attempts);
-                    tokio::time::sleep(delay).await;
                     
-                    // Reconnect with exponential backoff
-                    if let Ok(new_ws_url) = Url::parse(&url) {
-                        if let Ok((new_ws_stream, _)) = connect_async(new_ws_url).await {
-                            let (new_write, new_read) = new_ws_stream.split();
-                            write = new_write;
-                            read = new_read;
-                            
-                            // Resubscribe to channels after reconnection
-                            let resubscribe_msg = serde_json::json!({
-                                "op": "subscribe",
-                                "args": config.trading_pairs.iter().map(|pair| {
-                                    serde_json::json!({"channel": "tickers", "instId": pair.symbol()})
-                                }).collect::<Vec<_>>()
-                            });
-                            
-                            if let Err(e) = write.send(Message::Text(resubscribe_msg.to_string())).await {
-                                error!("Failed to resubscribe to OKX channels: {}", e);
-                                break;
-                            }
-                            
-                            info!("Successfully reconnected to OKX WebSocket");
-                            continue;
-                        }
-                    }
+                    // Calculate backoff with jitter and max cap
+                    let base_delay = std::cmp::min(2_u64.pow(reconnect_attempts), MAX_BACKOFF_SECONDS);
+                    let jitter = if base_delay >= 4 {
+                        fastrand::u64(0..base_delay / 4) // Add 25% jitter
+                    } else {
+                        0 // No jitter for very small delays
+                    };
+                    let delay = Duration::from_secs(base_delay + jitter);
+                    
+                    warn!("Attempting to reconnect to OKX WebSocket in {:?} (attempt {}/{})", 
+                          delay, reconnect_attempts, MAX_RECONNECT_ATTEMPTS);
+                    
+                    sleep(delay).await;
                 } else {
-                    error!("Max reconnection attempts reached for OKX WebSocket");
-                    break;
+                    // Check if we've been down too long (circuit breaker)
+                    let downtime = last_successful_connection.elapsed();
+                    if downtime > Duration::from_secs(1800) { // 30 minutes
+                        error!("OKX WebSocket has been down for {:?}, giving up permanently", downtime);
+                        break;
+                    }
+                    
+                    // Reset attempts after a longer delay
+                    warn!("Max reconnection attempts reached, waiting 5 minutes before retry...");
+                    sleep(Duration::from_secs(300)).await;
+                    reconnect_attempts = 0;
                 }
             }
+            
+            error!("❌ OKX WebSocket connection permanently failed");
         });
 
         self.connections.write().await.push(handle);
         Ok(())
+    }
+    
+    /// Establish OKX WebSocket connection with enhanced TLS handling
+    async fn establish_okx_connection(url: &str) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>> {
+        let ws_url = Url::parse(url)?;
+        
+        // Add connection timeout
+        let connect_future = connect_async(ws_url);
+        let timeout_duration = Duration::from_secs(30);
+        
+        match tokio::time::timeout(timeout_duration, connect_future).await {
+            Ok(Ok((ws_stream, _))) => {
+                Ok(ws_stream)
+            }
+            Ok(Err(e)) => {
+                Err(anyhow::anyhow!("WebSocket connection failed: {}", e))
+            }
+            Err(_) => {
+                Err(anyhow::anyhow!("WebSocket connection timeout after {:?}", timeout_duration))
+            }
+        }
     }
 
 
