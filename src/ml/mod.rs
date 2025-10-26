@@ -12,4 +12,6 @@ pub mod onnx_inference;
 pub mod model_manager;
 pub mod feature_bridge;
 pub mod onnx_integration;
+pub mod drift_detector;
+pub mod prediction_monitor;
 
