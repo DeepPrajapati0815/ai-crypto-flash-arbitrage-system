@@ -11,6 +11,8 @@ pub mod data_structures;
 pub mod onnx_inference;
 pub mod model_manager;
 pub mod feature_bridge;
+/// ✅ PRODUCTION FIX: Mandatory historical data warmup with exchange API integration
+pub mod historical_data_warmup;
 pub mod onnx_integration;
 pub mod drift_detector;
 pub mod prediction_monitor;

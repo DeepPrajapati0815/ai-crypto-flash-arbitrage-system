@@ -12,5 +12,15 @@ pub mod pnl_reconciliation; // ✅ AUDIT P&L RECONCILIATION FIX
 pub mod pnl_reconciliation_enhanced; // ✅ AUDIT FIX ISSUE #8/10: Full P&L tracking with slippage
 pub mod event_indexer;
 pub mod nonce_manager;
+/// ✅ PRODUCTION FIX: Enterprise-grade nonce management with real-time sync
+pub mod production_nonce_manager;
+/// ✅ PRODUCTION FIX: Dynamic gas estimation with buffers and retry logic
+pub mod dynamic_gas_estimator;
+/// ✅ PRODUCTION FIX: Real Chainlink oracle integration with staleness checks
+pub mod chainlink_oracle;
+/// ✅ PRODUCTION FIX: Dynamic profitability calculator with real-time costs
+pub mod profitability_calculator;
+/// ✅ PRODUCTION FIX: P&L reconciliation with on-chain transaction parsing
+pub mod pnl_reconciliation_production;
 pub mod eip1559_builder; // ✅ AUDIT FIX #5: EIP-1559 transaction builder with dynamic priority fees
 pub mod randomized_strategy; // ✅ AUDIT FIX #7: Randomized execution strategy to prevent pattern exploitation
