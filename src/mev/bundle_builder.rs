@@ -120,57 +120,64 @@ impl ArbitrageBundleBuilder {
         Ok(bundle)
     }
 
-    /// Build flash loan transaction
+    /// ❌ DEPRECATED: Build flash loan transaction
+    /// 
+    /// ⚠️ WARNING: This method is deprecated and should not be used.
+    /// ArbitrageBundleBuilder is superseded by the real production implementation in:
+    /// - src/execution/mev_tx.rs: build_mev_bundle() - REAL signed transaction building
+    /// - src/execution/evm_tx.rs: FlashArbTxBuilder - REAL EVM transaction encoding
+    /// 
+    /// This module (bundle_builder.rs) was an early prototype and is kept for
+    /// backward compatibility only. All new code should use mev_tx.rs instead.
     async fn build_flash_loan_transaction(&self) -> Result<String> {
-        // In a real implementation, this would create an actual flash loan transaction
-        // For now, we'll generate a placeholder transaction hash
-        let tx_data = format!(
-            "flash_loan_{}_{}_{}",
-            self.flash_loan_amount,
-            self.trading_pair,
-            Utc::now().timestamp()
+        tracing::error!(
+            "⚠️ DEPRECATED: ArbitrageBundleBuilder.build_flash_loan_transaction() called. \
+             Use build_mev_bundle() from src/execution/mev_tx.rs instead for production transactions."
         );
         
-        Ok(format!("0x{}", hex::encode(tx_data.as_bytes())))
+        Err(anyhow::anyhow!(
+            "DEPRECATED: This method creates placeholder transactions. \
+             Use build_mev_bundle() from src/execution/mev_tx.rs for real signed transactions."
+        ))
     }
 
-    /// Build buy transaction
+    /// ❌ DEPRECATED: Build buy transaction
     async fn build_buy_transaction(&self) -> Result<String> {
-        // In a real implementation, this would create an actual buy transaction
-        let tx_data = format!(
-            "buy_{}_{}_{}",
-            self.buy_exchange,
-            self.trading_pair,
-            Utc::now().timestamp()
+        tracing::error!(
+            "⚠️ DEPRECATED: ArbitrageBundleBuilder.build_buy_transaction() called. \
+             Use build_mev_bundle() from src/execution/mev_tx.rs instead."
         );
         
-        Ok(format!("0x{}", hex::encode(tx_data.as_bytes())))
+        Err(anyhow::anyhow!(
+            "DEPRECATED: This method creates placeholder transactions. \
+             Use build_mev_bundle() from src/execution/mev_tx.rs for real signed transactions."
+        ))
     }
 
-    /// Build sell transaction
+    /// ❌ DEPRECATED: Build sell transaction
     async fn build_sell_transaction(&self) -> Result<String> {
-        // In a real implementation, this would create an actual sell transaction
-        let tx_data = format!(
-            "sell_{}_{}_{}",
-            self.sell_exchange,
-            self.trading_pair,
-            Utc::now().timestamp()
+        tracing::error!(
+            "⚠️ DEPRECATED: ArbitrageBundleBuilder.build_sell_transaction() called. \
+             Use build_mev_bundle() from src/execution/mev_tx.rs instead."
         );
         
-        Ok(format!("0x{}", hex::encode(tx_data.as_bytes())))
+        Err(anyhow::anyhow!(
+            "DEPRECATED: This method creates placeholder transactions. \
+             Use build_mev_bundle() from src/execution/mev_tx.rs for real signed transactions."
+        ))
     }
 
-    /// Build repay transaction
+    /// ❌ DEPRECATED: Build repay transaction
     async fn build_repay_transaction(&self) -> Result<String> {
-        // In a real implementation, this would create an actual repay transaction
-        let tx_data = format!(
-            "repay_{}_{}_{}",
-            self.flash_loan_amount,
-            self.trading_pair,
-            Utc::now().timestamp()
+        tracing::error!(
+            "⚠️ DEPRECATED: ArbitrageBundleBuilder.build_repay_transaction() called. \
+             Use build_mev_bundle() from src/execution/mev_tx.rs instead."
         );
         
-        Ok(format!("0x{}", hex::encode(tx_data.as_bytes())))
+        Err(anyhow::anyhow!(
+            "DEPRECATED: This method creates placeholder transactions. \
+             Use build_mev_bundle() from src/execution/mev_tx.rs for real signed transactions."
+        ))
     }
 }
 

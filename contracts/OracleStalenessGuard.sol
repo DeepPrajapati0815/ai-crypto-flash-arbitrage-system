@@ -52,6 +52,75 @@ abstract contract OracleStalenessGuard {
     }
     
     /**
+     * ✅ AUDIT FIX ISSUE #MP2: Configure common oracle heartbeats for production
+     * @notice Batch configure heartbeats for common Chainlink price feeds
+     * @param oracles Array of oracle addresses
+     * @param heartbeats Array of heartbeat values (in seconds)
+     * @dev Common Chainlink heartbeat values:
+     *      - ETH/USD (mainnet): 3600 (1 hour)
+     *      - BTC/USD (mainnet): 3600 (1 hour)
+     *      - USDC/USD (mainnet): 86400 (24 hours)
+     *      - DAI/USD (mainnet): 3600 (1 hour)
+     *      - High-volatility pairs: 600 (10 minutes)
+     * 
+     *      Arbitrum/Optimism typically have shorter heartbeats (300-600 seconds)
+     */
+    function _configureCommonOracleHeartbeats(
+        address[] memory oracles, 
+        uint256[] memory heartbeats
+    ) internal {
+        require(oracles.length == heartbeats.length, "Array length mismatch");
+        require(oracles.length > 0, "Empty arrays");
+        
+        for (uint256 i = 0; i < oracles.length; i++) {
+            _setOracleHeartbeat(oracles[i], heartbeats[i]);
+        }
+    }
+    
+    /**
+     * ✅ AUDIT FIX ISSUE #MP2: Helper to set default heartbeats for Ethereum Mainnet
+     * @notice Configure standard heartbeats for common Chainlink feeds on Ethereum mainnet
+     * @param ethUsdOracle ETH/USD price feed address
+     * @param btcUsdOracle BTC/USD price feed address
+     * @param usdcUsdOracle USDC/USD price feed address
+     * @param daiUsdOracle DAI/USD price feed address
+     */
+    function _configureMainnetOracleHeartbeats(
+        address ethUsdOracle,
+        address btcUsdOracle,
+        address usdcUsdOracle,
+        address daiUsdOracle
+    ) internal {
+        if (ethUsdOracle != address(0)) {
+            _setOracleHeartbeat(ethUsdOracle, 3600);  // 1 hour
+        }
+        if (btcUsdOracle != address(0)) {
+            _setOracleHeartbeat(btcUsdOracle, 3600);  // 1 hour
+        }
+        if (usdcUsdOracle != address(0)) {
+            _setOracleHeartbeat(usdcUsdOracle, 86400);  // 24 hours (stable)
+        }
+        if (daiUsdOracle != address(0)) {
+            _setOracleHeartbeat(daiUsdOracle, 3600);  // 1 hour
+        }
+    }
+    
+    /**
+     * ✅ AUDIT FIX ISSUE #MP2: Helper for L2 chains (shorter heartbeats)
+     * @notice Configure heartbeats for Arbitrum/Optimism (typically more frequent updates)
+     * @param oracles Array of L2 oracle addresses
+     */
+    function _configureL2OracleHeartbeats(address[] memory oracles) internal {
+        uint256 l2Heartbeat = 600; // 10 minutes (typical for L2s)
+        
+        for (uint256 i = 0; i < oracles.length; i++) {
+            if (oracles[i] != address(0)) {
+                _setOracleHeartbeat(oracles[i], l2Heartbeat);
+            }
+        }
+    }
+    
+    /**
      * @notice Check if oracle data is fresh
      * @param oracleTimestamp Timestamp from oracle data
      * @return isFresh True if data is within staleness period

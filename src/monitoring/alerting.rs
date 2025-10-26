@@ -281,61 +281,422 @@ impl AlertManager {
     }
     
     /// Send email alert
+    /// ✅ AUDIT FIX: Real email integration via SMTP or API
     async fn send_email_alert(&self, alert: &Alert, recipients: &[String]) -> Result<()> {
         debug!("Sending email alert to {} recipients", recipients.len());
         
-        // This would integrate with an email service like SendGrid, SES, etc.
-        // For now, just log the alert
+        // ✅ PRODUCTION IMPLEMENTATION: Real email sending via HTTP API (SendGrid/AWS SES/Mailgun)
+        let email_api_key = std::env::var("EMAIL_API_KEY")
+            .unwrap_or_else(|_| "".to_string());
+        let email_api_url = std::env::var("EMAIL_API_URL")
+            .unwrap_or_else(|_| "https://api.sendgrid.com/v3/mail/send".to_string());
+        
+        if email_api_key.is_empty() {
+            tracing::warn!("EMAIL_API_KEY not set, skipping email alert");
+            return Ok(());
+        }
+        
+        let client = reqwest::Client::new();
+        
+        for recipient in recipients {
+            let body = serde_json::json!({
+                "personalizations": [{
+                    "to": [{"email": recipient}]
+                }],
+                "from": {"email": "alerts@trading-system.com"},
+                "subject": format!("[{}] {}", alert.severity, alert.name),
+                "content": [{
+                    "type": "text/html",
+                    "value": format!(
+                        "<h2>{}</h2><p>{}</p><p><strong>Severity:</strong> {}</p><p><strong>Component:</strong> {}</p><p><strong>Time:</strong> {}</p>",
+                        alert.name,
+                        alert.description,
+                        alert.severity,
+                        alert.component,
+                        alert.created_at.to_rfc3339()
+                    )
+                }]
+            });
+            
+            let response = client
+                .post(&email_api_url)
+                .header("Authorization", format!("Bearer {}", email_api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await;
+            
+            match response {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!("✅ Email alert sent to {}", recipient);
+                },
+                Ok(resp) => {
+                    tracing::error!("❌ Email API error {}: {}", resp.status(), resp.text().await.unwrap_or_default());
+                },
+                Err(e) => {
+                    tracing::error!("❌ Failed to send email: {}", e);
+                }
+            }
+        }
         
         Ok(())
     }
     
     /// Send Slack alert
+    /// ✅ AUDIT FIX: Real Slack webhook integration
     async fn send_slack_alert(&self, alert: &Alert, webhook_url: &str, channel: &str) -> Result<()> {
         debug!("Sending Slack alert to channel: {}", channel);
         
-        // This would send a POST request to the Slack webhook
-        // For now, just log the alert
+        // ✅ PRODUCTION IMPLEMENTATION: Real Slack webhook POST
+        let color = match alert.severity {
+            AlertSeverity::Critical => "#dc3545",
+            AlertSeverity::High => "#fd7e14",
+            AlertSeverity::Medium => "#ffc107",
+            AlertSeverity::Low => "#17a2b8",
+            AlertSeverity::Info => "#6c757d",
+        };
+        
+        let payload = serde_json::json!({
+            "channel": channel,
+            "username": "Trading Alert Bot",
+            "icon_emoji": ":chart_with_upwards_trend:",
+            "attachments": [{
+                "color": color,
+                "title": alert.name,
+                "text": alert.description,
+                "fields": [
+                    {"title": "Severity", "value": alert.severity.to_string(), "short": true},
+                    {"title": "Component", "value": &alert.component, "short": true},
+                    {"title": "Status", "value": format!("{:?}", alert.status), "short": true},
+                    {"title": "Time", "value": alert.created_at.to_rfc3339(), "short": true}
+                ],
+                "footer": "HFT Arbitrage System",
+                "ts": alert.created_at.timestamp()
+            }]
+        });
+        
+        let client = reqwest::Client::new();
+        let response = client
+            .post(webhook_url)
+            .json(&payload)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await;
+        
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!("✅ Slack alert sent to {}", channel);
+            },
+            Ok(resp) => {
+                tracing::error!("❌ Slack webhook error {}: {}", resp.status(), resp.text().await.unwrap_or_default());
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to send Slack alert: {}", e);
+            }
+        }
         
         Ok(())
     }
     
     /// Send Discord alert
+    /// ✅ AUDIT FIX: Real Discord webhook integration
     async fn send_discord_alert(&self, alert: &Alert, webhook_url: &str) -> Result<()> {
         debug!("Sending Discord alert");
         
-        // This would send a POST request to the Discord webhook
-        // For now, just log the alert
+        // ✅ PRODUCTION IMPLEMENTATION: Real Discord webhook POST
+        let color = match alert.severity {
+            AlertSeverity::Critical => 14362664, // Red
+            AlertSeverity::High => 16744272,    // Orange
+            AlertSeverity::Medium => 16771899,  // Yellow
+            AlertSeverity::Low => 1552218,      // Blue
+            AlertSeverity::Info => 7105644,     // Gray
+        };
+        
+        let payload = serde_json::json!({
+            "embeds": [{
+                "title": alert.name,
+                "description": alert.description,
+                "color": color,
+                "fields": [
+                    {"name": "Severity", "value": alert.severity.to_string(), "inline": true},
+                    {"name": "Component", "value": &alert.component, "inline": true},
+                    {"name": "Status", "value": format!("{:?}", alert.status), "inline": true},
+                ],
+                "footer": {"text": "HFT Arbitrage System"},
+                "timestamp": alert.created_at.to_rfc3339()
+            }]
+        });
+        
+        let client = reqwest::Client::new();
+        let response = client
+            .post(webhook_url)
+            .json(&payload)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await;
+        
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!("✅ Discord alert sent");
+            },
+            Ok(resp) => {
+                tracing::error!("❌ Discord webhook error {}: {}", resp.status(), resp.text().await.unwrap_or_default());
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to send Discord alert: {}", e);
+            }
+        }
         
         Ok(())
     }
     
     /// Send PagerDuty alert
+    /// ✅ AUDIT FIX: Real PagerDuty Events API v2 integration
     async fn send_pagerduty_alert(&self, alert: &Alert, integration_key: &str) -> Result<()> {
         debug!("Sending PagerDuty alert");
         
-        // This would send a POST request to PagerDuty API
-        // For now, just log the alert
+        // ✅ PRODUCTION IMPLEMENTATION: Real PagerDuty Events API v2
+        let severity_map = match alert.severity {
+            AlertSeverity::Critical => "critical",
+            AlertSeverity::High => "error",
+            AlertSeverity::Medium => "warning",
+            AlertSeverity::Low => "warning",
+            AlertSeverity::Info => "info",
+        };
+        
+        let payload = serde_json::json!({
+            "routing_key": integration_key,
+            "event_action": "trigger",
+            "dedup_key": &alert.id,
+            "payload": {
+                "summary": format!("{}: {}", alert.component, alert.name),
+                "severity": severity_map,
+                "source": "hft-arbitrage-system",
+                "component": &alert.component,
+                "custom_details": {
+                    "description": &alert.description,
+                    "status": format!("{:?}", alert.status),
+                    "metadata": &alert.metadata
+                }
+            }
+        });
+        
+        let client = reqwest::Client::new();
+        let response = client
+            .post("https://events.pagerduty.com/v2/enqueue")
+            .json(&payload)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await;
+        
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!("✅ PagerDuty alert triggered");
+            },
+            Ok(resp) => {
+                tracing::error!("❌ PagerDuty API error {}: {}", resp.status(), resp.text().await.unwrap_or_default());
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to send PagerDuty alert: {}", e);
+            }
+        }
         
         Ok(())
     }
     
     /// Send webhook alert
+    /// ✅ AUDIT FIX: Real webhook HTTP POST
     async fn send_webhook_alert(&self, alert: &Alert, url: &str, headers: &HashMap<String, String>) -> Result<()> {
         debug!("Sending webhook alert to: {}", url);
         
-        // This would send a POST request to the webhook URL
-        // For now, just log the alert
+        // ✅ PRODUCTION IMPLEMENTATION: Real webhook POST with custom headers
+        let payload = serde_json::json!({
+            "id": &alert.id,
+            "name": &alert.name,
+            "description": &alert.description,
+            "severity": alert.severity.to_string(),
+            "status": format!("{:?}", alert.status),
+            "component": &alert.component,
+            "created_at": alert.created_at.to_rfc3339(),
+            "metadata": &alert.metadata,
+            "tags": &alert.tags
+        });
+        
+        let client = reqwest::Client::new();
+        let mut request = client
+            .post(url)
+            .json(&payload)
+            .timeout(std::time::Duration::from_secs(10));
+        
+        // Add custom headers
+        for (key, value) in headers {
+            request = request.header(key, value);
+        }
+        
+        let response = request.send().await;
+        
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!("✅ Webhook alert sent to {}", url);
+            },
+            Ok(resp) => {
+                tracing::error!("❌ Webhook error {}: {}", resp.status(), resp.text().await.unwrap_or_default());
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to send webhook alert: {}", e);
+            }
+        }
         
         Ok(())
     }
     
     /// Send SMS alert
+    /// ✅ AUDIT FIX: Real Twilio SMS API integration
     async fn send_sms_alert(&self, alert: &Alert, recipients: &[String]) -> Result<()> {
         debug!("Sending SMS alert to {} recipients", recipients.len());
         
-        // This would integrate with an SMS service like Twilio
-        // For now, just log the alert
+        // ✅ PRODUCTION IMPLEMENTATION: Real Twilio SMS API
+        let twilio_account_sid = std::env::var("TWILIO_ACCOUNT_SID")
+            .unwrap_or_else(|_| "".to_string());
+        let twilio_auth_token = std::env::var("TWILIO_AUTH_TOKEN")
+            .unwrap_or_else(|_| "".to_string());
+        let twilio_from_number = std::env::var("TWILIO_FROM_NUMBER")
+            .unwrap_or_else(|_| "".to_string());
+        
+        if twilio_account_sid.is_empty() || twilio_auth_token.is_empty() {
+            tracing::warn!("Twilio credentials not set, skipping SMS alert");
+            return Ok(());
+        }
+        
+        let client = reqwest::Client::new();
+        let message = format!("[{}] {}: {}", alert.severity, alert.component, alert.name);
+        
+        for recipient in recipients {
+            let url = format!(
+                "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
+                twilio_account_sid
+            );
+            
+            let form_data = [
+                ("From", twilio_from_number.as_str()),
+                ("To", recipient.as_str()),
+                ("Body", message.as_str()),
+            ];
+            
+            let response = client
+                .post(&url)
+                .basic_auth(&twilio_account_sid, Some(&twilio_auth_token))
+                .form(&form_data)
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await;
+            
+            match response {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!("✅ SMS alert sent to {}", recipient);
+                },
+                Ok(resp) => {
+                    tracing::error!("❌ Twilio API error {}: {}", resp.status(), resp.text().await.unwrap_or_default());
+                },
+                Err(e) => {
+                    tracing::error!("❌ Failed to send SMS: {}", e);
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// ✅ AUDIT FIX ISSUE #MP3: Trigger alert for Dead Letter Queue items
+    /// @notice Alerts when orders are sent to Dead Letter Queue (execution failures)
+    /// @param order_id The failed order ID
+    /// @param error_msg The error message
+    /// @param attempt_count Number of execution attempts
+    pub async fn alert_dead_letter_queue(&mut self, order_id: &str, error_msg: &str, attempt_count: u32) -> Result<()> {
+        // Determine severity based on failure count and type
+        let severity = if attempt_count >= 5 {
+            AlertSeverity::Critical  // Multiple failures indicate systemic issue
+        } else if error_msg.contains("balance") || error_msg.contains("insufficient") {
+            AlertSeverity::High  // Balance/liquidity issues need immediate attention
+        } else if error_msg.contains("timeout") || error_msg.contains("network") {
+            AlertSeverity::Medium  // Network issues may self-resolve
+        } else {
+            AlertSeverity::High  // Unknown failures are treated as high priority
+        };
+        
+        let mut metadata = HashMap::new();
+        metadata.insert("order_id".to_string(), order_id.to_string());
+        metadata.insert("error".to_string(), error_msg.to_string());
+        metadata.insert("attempt_count".to_string(), attempt_count.to_string());
+        metadata.insert("dlq_category".to_string(), "order_execution_failure".to_string());
+        
+        let alert = Alert {
+            id: format!("dlq_{}", uuid::Uuid::new_v4()),
+            name: format!("Dead Letter Queue: Order {} Failed", order_id),
+            description: format!(
+                "Order {} failed execution after {} attempts. Error: {}. Manual review required.",
+                order_id, attempt_count, error_msg
+            ),
+            severity,
+            status: AlertStatus::Active,
+            component: "ExecutionEngine".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            resolved_at: None,
+            metadata,
+            tags: vec!["dlq".to_string(), "execution".to_string(), "manual_review".to_string()],
+        };
+        
+        // Store alert
+        self.alerts.insert(alert.id.clone(), alert.clone());
+        
+        // Send notifications
+        self.send_notifications(&alert).await?;
+        
+        tracing::warn!(
+            "🚨 DEAD LETTER QUEUE ALERT: Order {} failed after {} attempts - {}",
+            order_id, attempt_count, error_msg
+        );
+        
+        Ok(())
+    }
+    
+    /// ✅ AUDIT FIX ISSUE #MP3: Trigger batch alert for DLQ threshold
+    /// @notice Alerts when Dead Letter Queue exceeds threshold (potential systemic issue)
+    /// @param dlq_count Current number of items in DLQ
+    /// @param threshold Alert threshold
+    pub async fn alert_dlq_threshold_exceeded(&mut self, dlq_count: u64, threshold: u64) -> Result<()> {
+        let mut metadata = HashMap::new();
+        metadata.insert("dlq_count".to_string(), dlq_count.to_string());
+        metadata.insert("threshold".to_string(), threshold.to_string());
+        metadata.insert("overage".to_string(), (dlq_count - threshold).to_string());
+        
+        let alert = Alert {
+            id: format!("dlq_threshold_{}", uuid::Uuid::new_v4()),
+            name: "Dead Letter Queue Threshold Exceeded".to_string(),
+            description: format!(
+                "Dead Letter Queue contains {} items, exceeding threshold of {}. \
+                This may indicate a systemic execution issue. Investigate immediately.",
+                dlq_count, threshold
+            ),
+            severity: AlertSeverity::Critical,
+            status: AlertStatus::Active,
+            component: "ExecutionEngine".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            resolved_at: None,
+            metadata,
+            tags: vec!["dlq".to_string(), "threshold".to_string(), "systemic".to_string()],
+        };
+        
+        self.alerts.insert(alert.id.clone(), alert.clone());
+        self.send_notifications(&alert).await?;
+        
+        tracing::error!(
+            "🔥 CRITICAL DLQ ALERT: {} items in Dead Letter Queue (threshold: {})",
+            dlq_count, threshold
+        );
         
         Ok(())
     }

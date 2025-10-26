@@ -196,16 +196,14 @@ impl FeatureBridge {
     
     /// ✅ PRODUCTION FIX: Wait for historical data warmup before trading
     /// This ensures technical indicators have sufficient data to be meaningful
+    /// ✅ AUDIT FIX ISSUE #H1: Deadlock prevention using tokio::time::timeout
     pub async fn wait_for_warmup(
         &self, 
         pairs: &[String], 
         min_periods: usize, 
         timeout_secs: u64
     ) -> Result<()> {
-        use std::time::{Instant, Duration};
-        
-        let start = Instant::now();
-        let timeout = Duration::from_secs(timeout_secs);
+        use std::time::Duration;
         
         tracing::info!(
             "🔄 Waiting for historical data warmup (need {} periods for {} pairs)...", 
@@ -213,54 +211,84 @@ impl FeatureBridge {
             pairs.len()
         );
         
-        loop {
-            let history = self.price_history.read().await;
+        // ✅ Use tokio::time::timeout instead of manual polling
+        let warmup_future = async {
+            let mut last_log = tokio::time::Instant::now();
             
-            // Check if all pairs have sufficient data
-            let mut ready_count = 0;
-            let mut insufficient_pairs = Vec::new();
-            
-            for pair in pairs {
-                if let Some(data) = history.get(pair) {
-                    if data.has_sufficient_data(min_periods) {
-                        ready_count += 1;
-                    } else {
-                        insufficient_pairs.push((pair.clone(), data.prices.len()));
-                    }
-                } else {
-                    insufficient_pairs.push((pair.clone(), 0));
-                }
-            }
-            
-            // Log progress every 5 seconds
-            let elapsed = start.elapsed().as_secs();
-            if elapsed > 0 && elapsed % 5 == 0 {
-                tracing::info!(
-                    "📊 Warmup progress: {}/{} pairs ready ({:.1}%)", 
-                    ready_count, 
-                    pairs.len(),
-                    (ready_count as f64 / pairs.len() as f64) * 100.0
-                );
+            loop {
+                let history = self.price_history.read().await;
                 
-                if !insufficient_pairs.is_empty() && insufficient_pairs.len() <= 5 {
-                    for (pair, count) in &insufficient_pairs {
-                        tracing::debug!("  ⏳ {} has {}/{} periods", pair, count, min_periods);
+                // Check if all pairs have sufficient data
+                let mut ready_count = 0;
+                let mut insufficient_pairs = Vec::new();
+                
+                for pair in pairs {
+                    if let Some(data) = history.get(pair) {
+                        if data.has_sufficient_data(min_periods) {
+                            ready_count += 1;
+                        } else {
+                            insufficient_pairs.push((pair.clone(), data.prices.len()));
+                        }
+                    } else {
+                        insufficient_pairs.push((pair.clone(), 0));
                     }
                 }
+                
+                // Log progress every 5 seconds
+                if last_log.elapsed() >= Duration::from_secs(5) {
+                    tracing::info!(
+                        "📊 Warmup progress: {}/{} pairs ready ({:.1}%)", 
+                        ready_count, 
+                        pairs.len(),
+                        (ready_count as f64 / pairs.len() as f64) * 100.0
+                    );
+                    
+                    if !insufficient_pairs.is_empty() && insufficient_pairs.len() <= 5 {
+                        for (pair, count) in &insufficient_pairs {
+                            tracing::debug!("  ⏳ {} has {}/{} periods", pair, count, min_periods);
+                        }
+                    }
+                    last_log = tokio::time::Instant::now();
+                }
+                
+                // Check if all pairs are ready
+                if ready_count == pairs.len() {
+                    tracing::info!(
+                        "✅ Warmup complete: all {} pairs have {} periods of historical data", 
+                        pairs.len(), 
+                        min_periods
+                    );
+                    return Ok::<(), anyhow::Error>(());
+                }
+                
+                // Wait before checking again
+                drop(history); // Release lock before sleeping
+                tokio::time::sleep(Duration::from_millis(500)).await;
             }
-            
-            // Check if all pairs are ready
-            if ready_count == pairs.len() {
-                tracing::info!(
-                    "✅ Warmup complete: all {} pairs have {} periods of historical data", 
-                    pairs.len(), 
-                    min_periods
-                );
-                return Ok(());
-            }
-            
-            // Check timeout
-            if start.elapsed() > timeout {
+        };
+        
+        // Apply timeout using tokio::time::timeout (prevents indefinite hang)
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), warmup_future).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(_timeout_err) => {
+                // Timeout exceeded
+                let history = self.price_history.read().await;
+                let mut ready_count = 0;
+                let mut insufficient_pairs = Vec::new();
+                
+                for pair in pairs {
+                    if let Some(data) = history.get(pair) {
+                        if data.has_sufficient_data(min_periods) {
+                            ready_count += 1;
+                        } else {
+                            insufficient_pairs.push((pair.clone(), data.prices.len()));
+                        }
+                    } else {
+                        insufficient_pairs.push((pair.clone(), 0));
+                    }
+                }
+                
                 tracing::warn!(
                     "⚠️ Warmup timeout: only {}/{} pairs ready after {}s", 
                     ready_count, 
@@ -273,17 +301,13 @@ impl FeatureBridge {
                     tracing::warn!("  ⚠️ {} has only {}/{} periods", pair, count, min_periods);
                 }
                 
-                return Err(anyhow::anyhow!(
+                Err(anyhow::anyhow!(
                     "Warmup timeout: only {}/{} pairs ready after {}s", 
                     ready_count, 
                     pairs.len(), 
                     timeout_secs
-                ));
+                ))
             }
-            
-            // Wait before checking again
-            drop(history); // Release lock before sleeping
-            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
     
@@ -1038,6 +1062,7 @@ mod tests {
 }
 
 // Helper functions for technical indicators
+/// ✅ AUDIT FIX ISSUE #H5: NaN propagation prevention
 fn calculate_rsi_simple(prices: &[f64]) -> f64 {
     if prices.len() < 14 {
         return 50.0; // Neutral RSI if insufficient data
@@ -1060,12 +1085,25 @@ fn calculate_rsi_simple(prices: &[f64]) -> f64 {
     let avg_gain = gains.iter().sum::<f64>() / gains.len() as f64;
     let avg_loss = losses.iter().sum::<f64>() / losses.len() as f64;
     
+    // ✅ Fix NaN propagation: Check for both zero cases
+    if avg_gain == 0.0 && avg_loss == 0.0 {
+        return 50.0; // Neutral RSI when no price movement
+    }
+    
     if avg_loss == 0.0 {
-        return 100.0;
+        return 100.0; // Max RSI when only gains
     }
     
     let rs = avg_gain / avg_loss;
-    100.0 - (100.0 / (1.0 + rs))
+    let rsi = 100.0 - (100.0 / (1.0 + rs));
+    
+    // ✅ Additional safeguard against NaN/Inf
+    if rsi.is_nan() || rsi.is_infinite() {
+        tracing::warn!("⚠️ RSI calculation produced NaN/Inf, returning neutral value");
+        return 50.0;
+    }
+    
+    rsi
 }
 
 fn calculate_macd_simple(prices: &[f64]) -> f64 {

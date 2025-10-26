@@ -195,16 +195,102 @@ async fn metrics_handler() -> impl IntoResponse {
     }
 }
 
-/// Health check endpoint
+/// ✅ AUDIT FIX ISSUE #MP4: Enhanced health check endpoint with component statuses
+/// Returns JSON with detailed health information
 async fn health_handler() -> impl IntoResponse {
-    (StatusCode::OK, "OK")
+    use axum::Json;
+    use serde_json::json;
+    
+    // Gather health metrics
+    let opportunities_detected = OPPORTUNITIES_DETECTED.get();
+    let trades_executed = TRADES_EXECUTED.get();
+    let trades_failed = TRADES_FAILED.get();
+    let memory_mb = MEMORY_USAGE_MB.get();
+    let cpu_percent = CPU_USAGE_PERCENT.get();
+    
+    // Calculate health scores
+    let trade_success_rate = if trades_executed + trades_failed > 0 {
+        (trades_executed as f64 / (trades_failed + trades_failed) as f64) * 100.0
+    } else {
+        100.0
+    };
+    
+    // Determine overall health status
+    let (status, health_status) = if memory_mb > 8192 {
+        // Memory exceeds 8GB - degraded
+        (StatusCode::OK, "degraded")
+    } else if trade_success_rate < 50.0 && trades_executed > 10 {
+        // Low success rate - unhealthy
+        (StatusCode::SERVICE_UNAVAILABLE, "unhealthy")
+    } else if cpu_percent > 90 {
+        // CPU overload - degraded
+        (StatusCode::OK, "degraded")
+    } else {
+        // All systems operational
+        (StatusCode::OK, "healthy")
+    };
+    
+    let response = json!({
+        "status": health_status,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "uptime_seconds": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        "components": {
+            "arbitrage_engine": {
+                "status": if opportunities_detected > 0 { "healthy" } else { "idle" },
+                "opportunities_detected": opportunities_detected,
+            },
+            "execution_engine": {
+                "status": if trade_success_rate > 80.0 { "healthy" } 
+                         else if trade_success_rate > 50.0 { "degraded" } 
+                         else { "unhealthy" },
+                "trades_executed": trades_executed,
+                "trades_failed": trades_failed,
+                "success_rate_percent": format!("{:.2}", trade_success_rate),
+            },
+            "system_resources": {
+                "status": if memory_mb < 6144 && cpu_percent < 80 { "healthy" } 
+                         else if memory_mb < 8192 && cpu_percent < 90 { "degraded" } 
+                         else { "critical" },
+                "memory_usage_mb": memory_mb,
+                "cpu_usage_percent": cpu_percent,
+            }
+        },
+        "metrics_url": "/metrics"
+    });
+    
+    (status, Json(response))
+}
+
+/// ✅ AUDIT FIX ISSUE #MP4: Readiness probe endpoint
+/// Returns 200 only if system is ready to accept traffic
+async fn readiness_handler() -> (StatusCode, &'static str) {
+    let memory_mb = MEMORY_USAGE_MB.get();
+    
+    // Check if system resources are within acceptable limits
+    if memory_mb > 10240 {  // > 10GB
+        return (StatusCode::SERVICE_UNAVAILABLE, "Insufficient memory");
+    }
+    
+    (StatusCode::OK, "Ready")
+}
+
+/// ✅ AUDIT FIX ISSUE #MP4: Liveness probe endpoint  
+/// Returns 200 if the application is alive (simple ping)
+async fn liveness_handler() -> (StatusCode, &'static str) {
+    (StatusCode::OK, "Alive")
 }
 
 /// Start Prometheus metrics HTTP server
 pub async fn start_metrics_server(port: u16) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/metrics", get(metrics_handler))
-        .route("/health", get(health_handler));
+        .route("/health", get(health_handler))
+        // ✅ AUDIT FIX ISSUE #MP4: Kubernetes-compatible health probes
+        .route("/healthz", get(liveness_handler))      // Liveness probe
+        .route("/readyz", get(readiness_handler));     // Readiness probe
     
     let addr = format!("0.0.0.0:{}", port);
     info!("Starting Prometheus metrics server on {}", addr);

@@ -22,6 +22,9 @@ pub struct MetricsCollector {
     mev_fallback_count: Arc<RwLock<u64>>,
     mev_success_count: Arc<RwLock<u64>>,
     mev_fallback_reasons: Arc<RwLock<HashMap<String, u64>>>,
+    // ✅ AUDIT FIX ISSUE #MP1: Memory usage tracking
+    memory_usage_mb: Arc<RwLock<u64>>,
+    peak_memory_mb: Arc<RwLock<u64>>,
 }
 
 impl MetricsCollector {
@@ -40,7 +43,67 @@ impl MetricsCollector {
             mev_fallback_count: Arc::new(RwLock::new(0)),
             mev_success_count: Arc::new(RwLock::new(0)),
             mev_fallback_reasons: Arc::new(RwLock::new(HashMap::new())),
+            // ✅ AUDIT FIX ISSUE #MP1: Initialize memory tracking
+            memory_usage_mb: Arc::new(RwLock::new(0)),
+            peak_memory_mb: Arc::new(RwLock::new(0)),
         }
+    }
+    
+    /// ✅ AUDIT FIX ISSUE #MP1: Record current memory usage
+    /// Uses sysinfo crate to track RSS memory
+    pub async fn record_memory_usage(&self) {
+        #[cfg(not(target_os = "windows"))]
+        {
+            use std::fs;
+            
+            // Read from /proc/self/status on Linux
+            if let Ok(status) = fs::read_to_string("/proc/self/status") {
+                for line in status.lines() {
+                    if line.starts_with("VmRSS:") {
+                        if let Some(kb_str) = line.split_whitespace().nth(1) {
+                            if let Ok(kb) = kb_str.parse::<u64>() {
+                                let mb = kb / 1024;
+                                
+                                let mut current = self.memory_usage_mb.write().await;
+                                *current = mb;
+                                
+                                // Update peak if necessary
+                                let mut peak = self.peak_memory_mb.write().await;
+                                if mb > *peak {
+                                    *peak = mb;
+                                    debug!("New peak memory usage: {} MB", mb);
+                                }
+                                
+                                // Warn if memory usage is high
+                                if mb > 2048 {
+                                    tracing::warn!("⚠️ High memory usage: {} MB (peak: {} MB)", mb, *peak);
+                                }
+                                
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        #[cfg(target_os = "windows")]
+        {
+            // Windows-specific memory tracking using sysinfo
+            // Note: Requires sysinfo crate to be added to Cargo.toml
+            // For now, log a message that this feature requires additional setup
+            tracing::debug!("Memory tracking on Windows requires sysinfo crate");
+        }
+    }
+    
+    /// Get current memory usage in MB
+    pub async fn get_memory_usage(&self) -> u64 {
+        *self.memory_usage_mb.read().await
+    }
+    
+    /// Get peak memory usage in MB
+    pub async fn get_peak_memory(&self) -> u64 {
+        *self.peak_memory_mb.read().await
     }
     
     /// ✅ ISSUE #3 FIX: Record dropped feature (backpressure indicator)
@@ -195,6 +258,12 @@ impl MetricsCollector {
         stats.insert("mev_success_count".to_string(), mev_successes.to_string());
         stats.insert("mev_success_rate_pct".to_string(), format!("{:.2}", mev_success_rate));
         stats.insert("mev_total_attempts".to_string(), (mev_fallbacks + mev_successes).to_string());
+        
+        // ✅ AUDIT FIX ISSUE #MP1: Memory usage stats
+        let memory_mb = self.get_memory_usage().await;
+        let peak_memory_mb = self.get_peak_memory().await;
+        stats.insert("memory_usage_mb".to_string(), memory_mb.to_string());
+        stats.insert("peak_memory_mb".to_string(), peak_memory_mb.to_string());
         
         stats
     }

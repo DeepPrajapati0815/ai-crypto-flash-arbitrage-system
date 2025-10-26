@@ -653,6 +653,8 @@ impl HFTBot {
 
             // Print metrics every 100 iterations
             if iteration % 100 == 0 {
+                // ✅ AUDIT FIX ISSUE #MP1: Record memory usage before reporting
+                self.metrics_collector.record_memory_usage().await;
                 self.metrics_collector.print_report().await;
             }
 
