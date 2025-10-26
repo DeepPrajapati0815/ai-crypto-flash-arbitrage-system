@@ -2,13 +2,15 @@
 pragma solidity ^0.8.17;
 
 import "./FlashArb.sol";
+import "./OracleStalenessGuard.sol";  // ✅ AUDIT FIX ISSUE #11: Oracle staleness protection
 
 /**
  * @title FlashArbSecure
  * @notice Enhanced flash arbitrage contract with advanced MEV protection and route validation
- * @dev Implements commit-reveal, cryptographic route hashing, and gas price protection
+ * @dev Implements commit-reveal, cryptographic route hashing, gas price protection,
+ *      and oracle staleness validation (AUDIT FIX)
  */
-contract FlashArbSecure is FlashArb {
+contract FlashArbSecure is FlashArb, OracleStalenessGuard {
     
     // ============ Enhanced Security State ============
     
@@ -480,6 +482,71 @@ contract FlashArbSecure is FlashArb {
                    (block.number - commitTime) > MAX_COMMIT_BLOCKS;  // ✅ Block-based expiry
     }
     
+    // ============ Oracle Management (AUDIT FIX ISSUE #11) ============
+    
+    /**
+     * @notice Configure heartbeat for a Chainlink oracle
+     * @param oracle Oracle contract address
+     * @param heartbeat Expected update frequency in seconds
+     * @dev Common values: ETH/USD=3600, BTC/USD=3600, stablecoins=86400
+     */
+    function configureOracleHeartbeat(address oracle, uint256 heartbeat) external onlyOwner {
+        _setOracleHeartbeat(oracle, heartbeat);
+    }
+    
+    /**
+     * @notice Update maximum oracle staleness period
+     * @param newPeriod New maximum age in seconds (10s to 1h)
+     */
+    function setMaxOracleStalenessPeriod(uint256 newPeriod) external onlyOwner {
+        _setMaxOracleStalenessPeriod(newPeriod);
+    }
+    
+    /**
+     * @notice Validate oracle price with staleness check
+     * @param oracle Oracle address
+     * @param oracleTimestamp Timestamp from oracle data
+     * @param price Price from oracle
+     * @return isValid True if price is valid and fresh
+     * @dev This should be called before using any oracle price in arbitrage calculations
+     */
+    function validateOraclePrice(
+        address oracle,
+        uint256 oracleTimestamp,
+        uint256 price
+    ) public view returns (bool isValid) {
+        require(price > 0, "Invalid oracle price");
+        
+        try this._checkOracleFreshness(oracleTimestamp) returns (bool isFresh, uint256) {
+            return isFresh;
+        } catch {
+            return false;
+        }
+    }
+    
+    /**
+     * @notice Get Chainlink price with automatic staleness validation
+     * @param oracle Chainlink oracle address
+     * @return price Latest price (reverts if stale)
+     * @dev ✅ AUDIT FIX: Automatically validates staleness before returning price
+     */
+    function getChainlinkPriceValidated(address oracle) public view returns (uint256 price) {
+        require(oracle != address(0), "Invalid oracle");
+        
+        (
+            uint80 roundId,
+            int256 answer,
+            ,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = IChainlinkOracle(oracle).latestRoundData();
+        
+        // ✅ Validate with staleness check
+        _validateChainlinkResponse(roundId, answer, updatedAt, answeredInRound);
+        
+        return uint256(answer);
+    }
+    
     // ============ Emergency Functions ============
     
     /**
@@ -492,5 +559,19 @@ contract FlashArbSecure is FlashArb {
         // to prevent denial of service on legitimate routes
         emergencyPaused = true;
     }
+}
+
+/// Chainlink oracle interface for staleness validation
+interface IChainlinkOracle {
+    function latestRoundData()
+        external
+        view
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        );
 }
 

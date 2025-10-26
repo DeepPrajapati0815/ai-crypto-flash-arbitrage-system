@@ -51,7 +51,7 @@ impl UniswapConnector {
             ("WBTC", std::env::var("WBTC_ADDRESS").unwrap_or_else(|_| "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599".to_string())),
         ].iter().cloned().collect();
         
-        if let Some(&address) = token_addresses.get(symbol) {
+        if let Some(address) = token_addresses.get(symbol) {
             Ok(Address::from_str(address)?)
         } else {
             Err(anyhow::anyhow!("Token not found: {}", symbol))
@@ -174,14 +174,14 @@ impl UniswapOrderManager {
         let wbtc_addr = std::env::var("WBTC_ADDRESS")
             .unwrap_or_else(|_| "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599".to_string());
         
-        let token_addresses: HashMap<&str, &str> = [
-            ("USDC", &usdc_addr),
-            ("USDT", &usdt_addr),
-            ("WETH", &weth_addr),
-            ("WBTC", &wbtc_addr),
+        let token_addresses: HashMap<&str, String> = [
+            ("USDC", usdc_addr),
+            ("USDT", usdt_addr),
+            ("WETH", weth_addr),
+            ("WBTC", wbtc_addr),
         ].iter().cloned().collect();
         
-        if let Some(&address) = token_addresses.get(symbol) {
+        if let Some(address) = token_addresses.get(symbol) {
             Ok(Address::from_str(address)?)
         } else {
             Err(anyhow::anyhow!("Token not found: {}", symbol))

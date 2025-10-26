@@ -89,13 +89,16 @@ impl Default for CrossChainRiskParameters {
         Self {
             max_bridge_time_minutes: 30,
             min_profit_threshold: Decimal::from_str(&std::env::var("MIN_PROFIT_THRESHOLD")
-                .unwrap_or_else(|_| "0.02".to_string()))?, // 2%
+                .unwrap_or_else(|_| "0.02".to_string()))
+                .unwrap_or(Decimal::new(2, 2)), // 0.02 = 2%
             max_risk_score: std::env::var("MAX_RISK_SCORE")
                 .unwrap_or_else(|_| "0.7".to_string()).parse().unwrap_or(0.7),
             max_position_size: Decimal::from_str(&std::env::var("MAX_POSITION_SIZE")
-                .unwrap_or_else(|_| "10000".to_string()))?,
+                .unwrap_or_else(|_| "10000".to_string()))
+                .unwrap_or(Decimal::new(10000, 0)),
             max_daily_volume: Decimal::from_str(&std::env::var("MAX_DAILY_VOLUME")
-                .unwrap_or_else(|_| "100000".to_string()))?,
+                .unwrap_or_else(|_| "100000".to_string()))
+                .unwrap_or(Decimal::new(100000, 0)),
             bridge_failure_tolerance: std::env::var("BRIDGE_FAILURE_TOLERANCE")
                 .unwrap_or_else(|_| "0.1".to_string()).parse().unwrap_or(0.1), // 10%
         }
@@ -693,11 +696,13 @@ impl CrossChainArbitrageManager {
         let base_url = std::env::var("1INCH_API_URL")
             .unwrap_or_else(|_| "https://api.1inch.io/v5.0".to_string());
         let url = format!("{}/{}/quote", base_url, chain_id);
+        let eth_address = std::env::var("ETH_NATIVE_ADDRESS")
+            .unwrap_or_else(|_| "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string());
+        let amount = "1000000000000000000".to_string(); // 1 ETH
         let params = [
-            ("fromTokenAddress", &std::env::var("ETH_NATIVE_ADDRESS")
-                .unwrap_or_else(|_| "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string())), // ETH
-            ("toTokenAddress", &token_address),
-            ("amount", "1000000000000000000"), // 1 ETH
+            ("fromTokenAddress", eth_address.as_str()),
+            ("toTokenAddress", token_address.as_str()),
+            ("amount", amount.as_str()),
         ];
         
         let response = client.get(&url).query(&params).send().await?;
@@ -719,12 +724,15 @@ impl CrossChainArbitrageManager {
         let base_url = std::env::var("0X_API_URL")
             .unwrap_or_else(|_| "https://api.0x.org/swap/v1".to_string());
         let url = format!("{}/quote", base_url);
+        let eth_address = std::env::var("ETH_NATIVE_ADDRESS")
+            .unwrap_or_else(|_| "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string());
+        let sell_amount = "1000000000000000000".to_string();
+        let chain_id_str = chain_id.to_string();
         let params = [
-            ("sellToken", &std::env::var("ETH_NATIVE_ADDRESS")
-                .unwrap_or_else(|_| "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string())),
-            ("buyToken", &token_address),
-            ("sellAmount", "1000000000000000000"),
-            ("chainId", &chain_id.to_string()),
+            ("sellToken", eth_address.as_str()),
+            ("buyToken", token_address.as_str()),
+            ("sellAmount", sell_amount.as_str()),
+            ("chainId", chain_id_str.as_str()),
         ];
         
         let response = client.get(&url).query(&params).send().await?;

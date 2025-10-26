@@ -808,6 +808,98 @@ impl PostgresManager {
             Ok(None)
         }
     }
+
+    /// ✅ AUDIT FIX ISSUE #8/10: Get trade by ID for reconciliation
+    pub async fn get_trade_by_id(&self, trade_id: uuid::Uuid) -> Result<TradeRecord> {
+        self.query_counter.fetch_add(1, Ordering::Relaxed);
+        
+        let row = sqlx::query(
+            "SELECT * FROM trades WHERE id = $1"
+        )
+        .bind(trade_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Helper to parse Decimal from database
+        let parse_decimal = |col: &str| -> Decimal {
+            row.try_get::<String, _>(col)
+                .ok()
+                .and_then(|s| Decimal::from_str(&s).ok())
+                .unwrap_or(Decimal::ZERO)
+        };
+        
+        let parse_decimal_opt = |col: &str| -> Option<Decimal> {
+            row.try_get::<String, _>(col)
+                .ok()
+                .and_then(|s| Decimal::from_str(&s).ok())
+        };
+        
+        Ok(TradeRecord {
+            id: row.get("id"),
+            opportunity_id: row.get("opportunity_id"),
+            pair: row.get("pair"),
+            buy_exchange: row.get("buy_exchange"),
+            sell_exchange: row.get("sell_exchange"),
+            buy_price: parse_decimal("buy_price"),
+            sell_price: parse_decimal("sell_price"),
+            quantity: parse_decimal("quantity"),
+            actual_buy_price: parse_decimal_opt("actual_buy_price"),
+            actual_sell_price: parse_decimal_opt("actual_sell_price"),
+            actual_quantity: parse_decimal_opt("actual_quantity"),
+            profit_amount: parse_decimal("profit_amount"),
+            expected_profit: parse_decimal_opt("expected_profit"),
+            profit_percentage: parse_decimal("profit_percentage"),
+            slippage_percentage: parse_decimal_opt("slippage_percentage"),
+            buy_order_id: row.get("buy_order_id"),
+            sell_order_id: row.get("sell_order_id"),
+            status: row.get("status"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
+    }
+
+    /// ✅ AUDIT FIX ISSUE #8/10: Update trade record with actual execution data
+    pub async fn update_trade_record(&self, trade: &TradeRecord) -> Result<()> {
+        self.query_counter.fetch_add(1, Ordering::Relaxed);
+        
+        // Convert Decimal to String for database storage
+        let actual_buy_price_str = trade.actual_buy_price.map(|d| d.to_string());
+        let actual_sell_price_str = trade.actual_sell_price.map(|d| d.to_string());
+        let actual_quantity_str = trade.actual_quantity.map(|d| d.to_string());
+        let profit_amount_str = trade.profit_amount.to_string();
+        let expected_profit_str = trade.expected_profit.map(|d| d.to_string());
+        let profit_percentage_str = trade.profit_percentage.to_string();
+        let slippage_percentage_str = trade.slippage_percentage.map(|d| d.to_string());
+        
+        sqlx::query(
+            "UPDATE trades SET
+                actual_buy_price = $1,
+                actual_sell_price = $2,
+                actual_quantity = $3,
+                profit_amount = $4,
+                expected_profit = $5,
+                profit_percentage = $6,
+                slippage_percentage = $7,
+                status = $8,
+                updated_at = $9
+            WHERE id = $10"
+        )
+        .bind(actual_buy_price_str)
+        .bind(actual_sell_price_str)
+        .bind(actual_quantity_str)
+        .bind(profit_amount_str)
+        .bind(expected_profit_str)
+        .bind(profit_percentage_str)
+        .bind(slippage_percentage_str)
+        .bind(&trade.status)
+        .bind(trade.updated_at)
+        .bind(trade.id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated trade record {} with actual execution data", trade.id);
+        Ok(())
+    }
 }
 
 /// Trade statistics

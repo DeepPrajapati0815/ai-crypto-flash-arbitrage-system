@@ -115,9 +115,22 @@ impl FeatureBridge {
                     );
                 }
                 
-                // ✅ PRODUCTION SAFETY: If cache still too large, force eviction of oldest entries
-                if remaining > 1000 {
-                    let to_remove = remaining - 1000;
+                // ✅ AUDIT FIX ISSUE #12: Hard cap with panic on overflow (prevent unbounded growth)
+                const MAX_CACHE_SIZE: usize = 10000;  // Absolute maximum
+                const SOFT_LIMIT: usize = 1000;       // Target size
+                
+                if remaining > MAX_CACHE_SIZE {
+                    // This should never happen, but if it does, abort immediately
+                    tracing::error!(
+                        "🔴 CRITICAL: Cache overflow beyond hard cap! {} > {} entries",
+                        remaining, MAX_CACHE_SIZE
+                    );
+                    panic!("Feature cache exceeded hard cap of {} entries: {}", MAX_CACHE_SIZE, remaining);
+                }
+                
+                // ✅ PRODUCTION SAFETY: If cache exceeds soft limit, force eviction of oldest entries
+                if remaining > SOFT_LIMIT {
+                    let to_remove = remaining - SOFT_LIMIT;
                     
                     // Collect keys sorted by age
                     let mut entries: Vec<_> = cache.iter()
