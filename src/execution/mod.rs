@@ -24,3 +24,10 @@ pub mod profitability_calculator;
 pub mod pnl_reconciliation_production;
 pub mod eip1559_builder; // ✅ AUDIT FIX #5: EIP-1559 transaction builder with dynamic priority fees
 pub mod randomized_strategy; // ✅ AUDIT FIX #7: Randomized execution strategy to prevent pattern exploitation
+
+// ✅ DEEP AUDIT FIXES: Critical production safety improvements
+pub mod reorg_detector; // ✅ ISSUE #6 FIX: Chain reorg detection with automatic nonce resync
+pub mod enhanced_nonce_manager; // ✅ ISSUE #5-6 FIX: Nonce manager with reorg detection and MEV failure handling
+pub mod redundant_gas_oracle; // ✅ ISSUE #7 FIX: Redundant gas oracle with median aggregation
+pub mod realtime_pnl_tracker; // ✅ ISSUE #13 FIX: Real-time P&L tracking with transaction lifecycle monitoring
+pub mod mev_execution_racer; // ✅ ISSUE #11 FIX: Parallel MEV + regular execution racing

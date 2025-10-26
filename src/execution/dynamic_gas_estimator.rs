@@ -196,7 +196,12 @@ impl DynamicGasEstimator {
         })
     }
 
-    /// Get optimal buffer based on historical data
+    /// ✅ ISSUE #8 FIX: Get optimal buffer using PERCENTILE-BASED calculation
+    /// 
+    /// Previous implementation used max + 20%, which creates escalation loop:
+    /// high gas → higher avg → higher buffer → even higher gas → ...
+    /// 
+    /// New approach: Use 90th percentile + 10% buffer (capped at 20%)
     async fn get_optimal_buffer(&self, tx: &TransactionRequest) -> u32 {
         if let Some(to) = &tx.to {
             if let Some(data) = &tx.data {
@@ -211,20 +216,38 @@ impl DynamicGasEstimator {
                 let usage = self.historical_usage.read().await;
 
                 if let Some(hist) = usage.get(&key) {
-                    // If we have history, use max gas + 20% as recommended limit
-                    // But cap at 40% buffer to avoid overpaying
-                    let recommended = hist.get_recommended_limit();
-                    let avg = hist.avg_gas_used;
-                    
-                    if avg > 0 {
-                        let buffer = ((recommended - avg) as f64 / avg as f64 * 100.0) as u32;
-                        return buffer.min(40); // Cap at 40%
+                    // ✅ CRITICAL FIX: Use percentile-based buffer, not max-based
+                    let mut sorted = hist.gas_used_history.clone();
+                    if sorted.len() >= 5 {
+                        sorted.sort();
+                        
+                        // Calculate 90th percentile
+                        let p90_idx = ((sorted.len() as f64) * 0.9) as usize;
+                        let p90_gas = sorted[p90_idx.min(sorted.len() - 1)];
+                        
+                        let avg = hist.avg_gas_used;
+                        
+                        if avg > 0 {
+                            // Buffer = (p90 - avg) / avg * 100%
+                            let buffer = ((p90_gas as f64 - avg as f64) / avg as f64 * 100.0) as u32;
+                            
+                            // ✅ CRITICAL: Cap at 20% (not 40%), with minimum 5%
+                            let capped_buffer = buffer.max(5).min(20);
+                            
+                            debug!(
+                                "📊 Percentile-based gas buffer for {}: {}% (p90={}, avg={})",
+                                key, capped_buffer, p90_gas, avg
+                            );
+                            
+                            return capped_buffer;
+                        }
                     }
                 }
             }
         }
 
-        self.default_buffer_percentage
+        // ✅ CRITICAL: Default reduced from 30% to 15%
+        15
     }
 
     /// ✅ PRODUCTION: Get real-time gas price from oracle

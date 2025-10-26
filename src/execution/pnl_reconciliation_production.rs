@@ -93,7 +93,7 @@ pub struct ReconciliationStats {
 /// Production P&L reconciliation engine
 pub struct PnLReconciliationEngine {
     provider: Arc<Provider<Http>>,
-    eth_price_usd: Arc<RwLock<Decimal>>,
+    pub eth_price_usd: Arc<RwLock<Decimal>>,
     reconciliation_history: Arc<RwLock<Vec<ReconciliationResult>>>,
     max_acceptable_deviation_pct: Decimal,
     max_history_size: usize,
