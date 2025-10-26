@@ -156,6 +156,9 @@ impl StatisticalArbitrage {
                     timestamp: Utc::now(),
                     confidence: correlation.abs() as f64,
                     opportunity_type: "Statistical Arbitrage".to_string(),
+                    orderbook_version: 0, // TODO: Get from orderbook manager
+                    snapshot_timestamp: Utc::now(),
+                    validity_window_ms: 200, // 200ms validity window
                 };
 
                 info!("Found statistical arbitrage opportunity: {} vs {} (correlation: {:.3})", 

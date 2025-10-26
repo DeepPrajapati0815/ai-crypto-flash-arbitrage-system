@@ -99,6 +99,9 @@ impl BacktestStrategy for SimpleArbitrageStrategy {
                             timestamp: Utc::now(),
                             confidence: 0.8,
                             opportunity_type: "Simple Arbitrage".to_string(),
+                            orderbook_version: 0, // TODO: Get from orderbook manager
+                            snapshot_timestamp: Utc::now(),
+                            validity_window_ms: 200, // 200ms validity window
                         };
                         
                         return Ok(Some(opportunity));
@@ -206,6 +209,9 @@ impl BacktestStrategy for TriangularArbitrageStrategy {
                     timestamp: Utc::now(),
                     confidence: 0.7,
                     opportunity_type: "Triangular Arbitrage".to_string(),
+                    orderbook_version: 0, // TODO: Get from orderbook manager
+                    snapshot_timestamp: Utc::now(),
+                    validity_window_ms: 200, // 200ms validity window
                 };
                 
                 return Ok(Some(opportunity));
@@ -419,6 +425,9 @@ impl BacktestStrategy for StatisticalArbitrageStrategy {
                                         timestamp: Utc::now(),
                                         confidence: correlation.abs() as f64,
                                         opportunity_type: "Statistical Arbitrage".to_string(),
+                                        orderbook_version: 0, // TODO: Get from orderbook manager
+                                        snapshot_timestamp: Utc::now(),
+                                        validity_window_ms: 200, // 200ms validity window
                                     };
                                     
                                     return Ok(Some(opportunity));

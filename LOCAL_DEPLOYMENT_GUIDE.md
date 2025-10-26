@@ -221,10 +221,10 @@ docker compose -f docker-compose.local.yml restart hft-bot
 
 ```bash
 # Using docker exec
-docker compose -f docker-compose.local.yml exec postgres psql -U hftbot -d hft_bot
+docker compose -f docker-compose.local.yml exec postgres psql -U hftbot -d hftbot
 
 # Using local psql
-psql -h localhost -U hftbot -d hft_bot
+psql -h localhost -U hftbot -d hftbot
 # Password: test123
 ```
 
@@ -248,7 +248,7 @@ RUST_LOG=info
 # Database
 POSTGRES_PASSWORD=test123
 POSTGRES_USER=hftbot
-POSTGRES_DB=hft_bot
+POSTGRES_DB=hftbot
 
 # Logging
 RUST_LOG=info

@@ -1,24 +1,85 @@
-//! ✅ ISSUE #5 FIX: Robust Nonce Manager with Network Sync (PRODUCTION-READY)
+//! ✅ AUDIT FIX #4: Robust Nonce Manager with RAII Guards (PRODUCTION-READY)
 //! 
 //! Manages EVM transaction nonces with automatic network synchronization,
-//! preventing "nonce too low" errors after bot restarts or network issues.
+//! preventing "nonce too low" errors and ensuring atomic nonce reservation
+//! with automatic rollback on failure.
 
 use anyhow::{Result, Context};
 use ethers_core::types::{Address, U256};
 use ethers_providers::{Provider, Http, Middleware};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn, error, debug};
 
-/// ✅ PRODUCTION: Nonce manager with automatic network synchronization
+/// ✅ AUDIT FIX #4: Nonce manager with atomic reservation and RAII guards
 pub struct NonceManager {
     /// Cached nonces per address
     nonces: Arc<RwLock<HashMap<Address, u64>>>,
     /// RPC provider for network queries
     provider: Option<Arc<Provider<Http>>>,
-    /// Track pending nonces for rollback on failure
-    pending_nonces: Arc<RwLock<HashMap<Address, Vec<u64>>>>,
+    /// ✅ AUDIT FIX #4: Track reserved nonces to prevent double-use
+    reserved_nonces: Arc<RwLock<HashMap<Address, HashSet<u64>>>>,
+    /// ✅ AUDIT FIX #4: Track confirmed nonces for validation
+    confirmed_nonces: Arc<RwLock<HashMap<Address, u64>>>,
+}
+
+/// ✅ AUDIT FIX #4: RAII guard for automatic nonce rollback on drop
+pub struct NonceReservation {
+    address: Address,
+    nonce: u64,
+    manager: Arc<NonceManager>,
+    /// Track if nonce was confirmed (prevents automatic rollback)
+    confirmed: Arc<RwLock<bool>>,
+}
+
+impl NonceReservation {
+    /// Get the reserved nonce value
+    pub fn nonce(&self) -> u64 {
+        self.nonce
+    }
+    
+    /// Get the address this nonce is for
+    pub fn address(&self) -> Address {
+        self.address
+    }
+    
+    /// ✅ AUDIT FIX #4: Confirm nonce was used successfully (prevents auto-rollback)
+    pub async fn confirm(self) -> Result<()> {
+        let mut confirmed = self.confirmed.write().await;
+        *confirmed = true;
+        
+        self.manager.confirm_nonce_internal(self.address, self.nonce).await?;
+        
+        debug!("✅ Nonce reservation confirmed: {:?} -> {}", self.address, self.nonce);
+        Ok(())
+    }
+}
+
+impl Drop for NonceReservation {
+    fn drop(&mut self) {
+        // Check if confirmed - if not, spawn rollback task
+        let confirmed = self.confirmed.clone();
+        let manager = self.manager.clone();
+        let address = self.address;
+        let nonce = self.nonce;
+        
+        tokio::spawn(async move {
+            let is_confirmed = *confirmed.read().await;
+            
+            if !is_confirmed {
+                // Auto-rollback: nonce was reserved but never confirmed
+                warn!(
+                    "⚠️ NonceReservation dropped without confirmation - auto-rollback: {:?} -> {}",
+                    address, nonce
+                );
+                
+                if let Err(e) = manager.release_nonce(address, nonce).await {
+                    error!("❌ Failed to rollback nonce during drop: {}", e);
+                }
+            }
+        });
+    }
 }
 
 impl NonceManager {
@@ -29,7 +90,8 @@ impl NonceManager {
         Self {
             nonces: Arc::new(RwLock::new(HashMap::new())),
             provider: None,
-            pending_nonces: Arc::new(RwLock::new(HashMap::new())),
+            reserved_nonces: Arc::new(RwLock::new(HashMap::new())),
+            confirmed_nonces: Arc::new(RwLock::new(HashMap::new())),
         }
     }
     
@@ -43,8 +105,54 @@ impl NonceManager {
         Ok(Self {
             nonces: Arc::new(RwLock::new(HashMap::new())),
             provider: Some(Arc::new(provider)),
-            pending_nonces: Arc::new(RwLock::new(HashMap::new())),
+            reserved_nonces: Arc::new(RwLock::new(HashMap::new())),
+            confirmed_nonces: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+    
+    /// ✅ AUDIT FIX #4: Reserve a nonce atomically with RAII guard
+    pub async fn reserve_nonce(self: Arc<Self>, address: Address) -> Result<NonceReservation> {
+        let mut nonces = self.nonces.write().await;
+        let mut reserved = self.reserved_nonces.write().await;
+        
+        let nonce = *nonces.entry(address).or_insert(0);
+        
+        // Find next unreserved nonce
+        let mut candidate = nonce;
+        let addr_reserved = reserved.entry(address).or_insert_with(HashSet::new);
+        
+        while addr_reserved.contains(&candidate) {
+            candidate += 1;
+        }
+        
+        // Reserve this nonce
+        addr_reserved.insert(candidate);
+        *nonces.entry(address).or_insert(0) = candidate + 1;
+        
+        debug!("📝 Nonce reserved: {:?} -> {}", address, candidate);
+        
+        Ok(NonceReservation {
+            address,
+            nonce: candidate,
+            manager: self.clone(),
+            confirmed: Arc::new(RwLock::new(false)),
+        })
+    }
+    
+    /// ✅ AUDIT FIX #4: Internal confirmation (called by NonceReservation)
+    async fn confirm_nonce_internal(&self, address: Address, nonce: u64) -> Result<()> {
+        let mut reserved = self.reserved_nonces.write().await;
+        let mut confirmed = self.confirmed_nonces.write().await;
+        
+        // Remove from reserved set
+        if let Some(addr_reserved) = reserved.get_mut(&address) {
+            addr_reserved.remove(&nonce);
+        }
+        
+        // Add to confirmed
+        confirmed.insert(address, nonce);
+        
+        Ok(())
     }
     
     /// ✅ PRODUCTION: Initialize nonce for an address (with automatic network sync)
@@ -99,9 +207,9 @@ impl NonceManager {
         // ✅ Increment cached nonce
         nonces.insert(address, current_nonce + 1);
         
-        // ✅ Track as pending (for rollback if tx fails)
-        let mut pending = self.pending_nonces.write().await;
-        pending.entry(address).or_insert_with(Vec::new).push(next_nonce);
+        // ✅ Track as reserved (for rollback if tx fails)
+        let mut reserved = self.reserved_nonces.write().await;
+        reserved.entry(address).or_insert_with(HashSet::new).insert(next_nonce);
         
         debug!("📝 Nonce allocated: {:?} -> {}", address, next_nonce);
         
@@ -110,11 +218,11 @@ impl NonceManager {
     
     /// ✅ PRODUCTION: Confirm nonce was used successfully (transaction mined)
     pub async fn confirm_nonce(&self, address: Address, nonce: u64) -> Result<()> {
-        // Remove from pending list
-        let mut pending = self.pending_nonces.write().await;
+        // Remove from reserved set
+        let mut reserved = self.reserved_nonces.write().await;
         
-        if let Some(nonces) = pending.get_mut(&address) {
-            nonces.retain(|&n| n != nonce);
+        if let Some(nonces) = reserved.get_mut(&address) {
+            nonces.remove(&nonce);
             debug!("✅ Nonce confirmed: {:?} -> {}", address, nonce);
         }
         
@@ -124,11 +232,11 @@ impl NonceManager {
     /// ✅ PRODUCTION: Release nonce (transaction failed before submission)
     pub async fn release_nonce(&self, address: Address, nonce: u64) -> Result<()> {
         let mut nonces = self.nonces.write().await;
-        let mut pending = self.pending_nonces.write().await;
+        let mut reserved = self.reserved_nonces.write().await;
         
-        // Remove from pending
-        if let Some(pending_nonces) = pending.get_mut(&address) {
-            pending_nonces.retain(|&n| n != nonce);
+        // Remove from reserved set
+        if let Some(reserved_nonces) = reserved.get_mut(&address) {
+            reserved_nonces.remove(&nonce);
         }
         
         let current_nonce = nonces.get(&address).copied().unwrap_or(0);
@@ -166,9 +274,9 @@ impl NonceManager {
                 
                 nonces.insert(address, network_nonce_u64);
                 
-                // Clear pending nonces (they're likely stale)
-                let mut pending = self.pending_nonces.write().await;
-                pending.remove(&address);
+                // Clear reserved nonces (they're likely stale)
+                let mut reserved = self.reserved_nonces.write().await;
+                reserved.remove(&address);
                 
                 info!("✅ Nonce synced with network: {:?} -> {}", address, network_nonce_u64);
             } else {
@@ -187,10 +295,10 @@ impl NonceManager {
         nonces.get(&address).copied()
     }
     
-    /// ✅ PRODUCTION: Get pending nonce count (for monitoring)
+    /// ✅ PRODUCTION: Get reserved nonce count (for monitoring)
     pub async fn get_pending_count(&self, address: Address) -> usize {
-        let pending = self.pending_nonces.read().await;
-        pending.get(&address).map(|v| v.len()).unwrap_or(0)
+        let reserved = self.reserved_nonces.read().await;
+        reserved.get(&address).map(|v| v.len()).unwrap_or(0)
     }
     
     /// ✅ ISSUE #5 FIX: Force resync all addresses (recovery after network issues)

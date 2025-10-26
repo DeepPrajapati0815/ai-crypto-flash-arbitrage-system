@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
     
     environment:
-      - POSTGRES_DB=${POSTGRES_DB:-hft_bot}
+      - POSTGRES_DB=${POSTGRES_DB:-hftbot}
       - POSTGRES_USER=${POSTGRES_USER:-hftbot}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-test123}
     
@@ -82,7 +82,7 @@ services:
     container_name: hft-ml-trainer-local
     
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD:-test123}@postgres:5432/${POSTGRES_DB:-hft_bot}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD:-test123}@postgres:5432/${POSTGRES_DB:-hftbot}
       - REDIS_URL=redis://redis:6379
       - PYTHONUNBUFFERED=1
     
@@ -124,7 +124,7 @@ services:
       - RUST_BACKTRACE=1
       
       # Database connections
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hft_bot}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hftbot}
       - REDIS_URL=redis://redis:6379
       
       # Monitoring

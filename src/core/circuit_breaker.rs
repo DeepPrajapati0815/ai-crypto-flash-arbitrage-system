@@ -53,6 +53,7 @@ pub struct CircuitBreakerStats {
 }
 
 /// Circuit breaker for protecting system components
+#[derive(Debug)]
 pub struct CircuitBreaker {
     name: String,
     state: Arc<RwLock<CircuitState>>,
@@ -357,10 +358,36 @@ impl Default for CircuitBreaker {
     }
 }
 
-/// Emergency system controller
+/// ✅ AUDIT FIX #8: Component hierarchy level for cascading failures
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ComponentLevel {
+    /// Infrastructure level (database, network)
+    Infrastructure = 0,
+    /// Data sources (exchanges, oracles)
+    DataSource = 1,
+    /// Core logic (arbitrage engine, ML)
+    CoreLogic = 2,
+    /// Execution (trading, MEV)
+    Execution = 3,
+}
+
+/// ✅ AUDIT FIX #8: Component metadata for hierarchical tracking
+#[derive(Debug, Clone)]
+pub struct ComponentMetadata {
+    pub name: String,
+    pub level: ComponentLevel,
+    pub dependencies: Vec<String>,  // Components this depends on
+    pub breaker: Arc<CircuitBreaker>,
+}
+
+/// ✅ AUDIT FIX #8: Emergency system controller with hierarchical coordination
 pub struct EmergencyController {
     circuit_breakers: Arc<RwLock<std::collections::HashMap<String, Arc<CircuitBreaker>>>>,
+    /// ✅ AUDIT FIX #8: Track component hierarchy and dependencies
+    component_metadata: Arc<RwLock<std::collections::HashMap<String, ComponentMetadata>>>,
     emergency_mode: Arc<RwLock<bool>>,
+    /// ✅ AUDIT FIX #8: Root cause tracking
+    failure_root_cause: Arc<RwLock<Option<String>>>,
 }
 
 impl EmergencyController {
@@ -368,8 +395,40 @@ impl EmergencyController {
     pub fn new() -> Self {
         Self {
             circuit_breakers: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            component_metadata: Arc::new(RwLock::new(std::collections::HashMap::new())),
             emergency_mode: Arc::new(RwLock::new(false)),
+            failure_root_cause: Arc::new(RwLock::new(None)),
         }
+    }
+    
+    /// ✅ AUDIT FIX #8: Register component with hierarchy metadata
+    pub async fn register_component(
+        &self,
+        name: &str,
+        level: ComponentLevel,
+        dependencies: Vec<String>,
+    ) -> Arc<CircuitBreaker> {
+        let breaker = Arc::new(CircuitBreaker::with_name_and_config(
+            name,
+            CircuitBreakerConfig::default(),
+        ));
+        
+        let metadata = ComponentMetadata {
+            name: name.to_string(),
+            level,
+            dependencies,
+            breaker: breaker.clone(),
+        };
+        
+        let mut breakers = self.circuit_breakers.write().await;
+        let mut metadata_map = self.component_metadata.write().await;
+        
+        breakers.insert(name.to_string(), breaker.clone());
+        metadata_map.insert(name.to_string(), metadata);
+        
+        info!("Registered component '{}' at level {:?} with {} dependencies", name, level, metadata_map.get(name).unwrap().dependencies.len());
+        
+        breaker
     }
 
     /// Get or create circuit breaker for a component
@@ -379,10 +438,83 @@ impl EmergencyController {
         if let Some(breaker) = breakers.get(component) {
             breaker.clone()
         } else {
-            let breaker = Arc::new(CircuitBreaker::new());
+            let breaker = Arc::new(CircuitBreaker::with_name_and_config(
+                component,
+                CircuitBreakerConfig::default(),
+            ));
             breakers.insert(component.to_string(), breaker.clone());
             breaker
         }
+    }
+    
+    /// ✅ AUDIT FIX #8: Handle component failure with cascading circuit breaker logic
+    pub async fn handle_component_failure(&self, component: &str, error: &str) -> Result<()> {
+        error!("Component '{}' failed: {}", component, error);
+        
+        // Open circuit breaker for failed component
+        if let Some(breaker) = self.circuit_breakers.read().await.get(component) {
+            breaker.open().await;
+        }
+        
+        // Check if this is a root cause failure (infrastructure level)
+        let metadata_map = self.component_metadata.read().await;
+        if let Some(metadata) = metadata_map.get(component) {
+            if metadata.level == ComponentLevel::Infrastructure {
+                // Infrastructure failure - set as root cause
+                *self.failure_root_cause.write().await = Some(component.to_string());
+                
+                warn!(
+                    "⚠️ Infrastructure component '{}' failed - this is a root cause. Cascading circuit breakers...",
+                    component
+                );
+                
+                // Cascade to dependent components
+                self.cascade_circuit_breakers(component, &metadata_map).await;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// ✅ AUDIT FIX #8: Cascade circuit breakers for dependent components
+    async fn cascade_circuit_breakers(
+        &self,
+        failed_component: &str,
+        metadata_map: &std::collections::HashMap<String, ComponentMetadata>,
+    ) {
+        // Find all components that depend on the failed component
+        let mut to_open = Vec::new();
+        
+        for (name, metadata) in metadata_map.iter() {
+            if metadata.dependencies.contains(&failed_component.to_string()) {
+                to_open.push(name.clone());
+            }
+        }
+        
+        // Open circuit breakers for dependent components
+        for component_name in to_open {
+            if let Some(metadata) = metadata_map.get(&component_name) {
+                metadata.breaker.open().await;
+                warn!(
+                    "⚠️ Opened circuit breaker for '{}' due to dependency failure: {}",
+                    component_name, failed_component
+                );
+                
+                // Recursively cascade to components that depend on this one
+                Box::pin(self.cascade_circuit_breakers(&component_name, metadata_map)).await;
+            }
+        }
+    }
+    
+    /// ✅ AUDIT FIX #8: Get root cause of cascading failure
+    pub async fn get_failure_root_cause(&self) -> Option<String> {
+        self.failure_root_cause.read().await.clone()
+    }
+    
+    /// ✅ AUDIT FIX #8: Clear root cause (after resolution)
+    pub async fn clear_failure_root_cause(&self) {
+        *self.failure_root_cause.write().await = None;
+        info!("Root cause cleared");
     }
 
     /// Check if system is in emergency mode

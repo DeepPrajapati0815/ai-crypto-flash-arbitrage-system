@@ -54,7 +54,7 @@ pub struct OrderBook {
     pub bids: Vec<PriceLevel>,
     pub asks: Vec<PriceLevel>,
     pub timestamp: DateTime<Utc>,
-    pub sequence: u64,
+    pub sequence: u64,  // ✅ AUDIT FIX #1: Already has sequence field for versioning
 }
 
 impl OrderBook {
@@ -138,6 +138,12 @@ pub struct ArbitrageOpportunity {
     pub timestamp: DateTime<Utc>,
     pub confidence: f64,
     pub opportunity_type: String,
+    /// ✅ AUDIT FIX #1: Orderbook snapshot version for stale data detection
+    pub orderbook_version: u64,
+    /// ✅ AUDIT FIX #1: Snapshot timestamp for freshness validation
+    pub snapshot_timestamp: DateTime<Utc>,
+    /// ✅ AUDIT FIX #1: Validity window in milliseconds (200ms default)
+    pub validity_window_ms: u64,
 }
 
 impl ArbitrageOpportunity {
@@ -187,7 +193,36 @@ impl ArbitrageOpportunity {
             timestamp: Utc::now(),
             confidence,
             opportunity_type: "CrossExchange".to_string(),
+            orderbook_version: 0,  // ✅ AUDIT FIX #1: Initialize with default
+            snapshot_timestamp: Utc::now(),  // ✅ AUDIT FIX #1: Current time
+            validity_window_ms: 200,  // ✅ AUDIT FIX #1: 200ms default validity
         }
+    }
+    
+    /// ✅ AUDIT FIX #1: Validate opportunity freshness before execution
+    pub fn is_fresh(&self, current_orderbook_version: u64) -> bool {
+        let age_ms = Utc::now()
+            .signed_duration_since(self.snapshot_timestamp)
+            .num_milliseconds();
+        
+        // Reject if orderbook changed OR exceeded validity window
+        self.orderbook_version == current_orderbook_version 
+            && age_ms >= 0 
+            && (age_ms as u64) < self.validity_window_ms
+    }
+    
+    /// ✅ AUDIT FIX #1: Get age of opportunity in milliseconds
+    pub fn age_ms(&self) -> i64 {
+        Utc::now()
+            .signed_duration_since(self.snapshot_timestamp)
+            .num_milliseconds()
+    }
+    
+    /// ✅ AUDIT FIX #1: Create opportunity with orderbook snapshot version
+    pub fn with_snapshot_version(mut self, version: u64, timestamp: DateTime<Utc>) -> Self {
+        self.orderbook_version = version;
+        self.snapshot_timestamp = timestamp;
+        self
     }
 }
 

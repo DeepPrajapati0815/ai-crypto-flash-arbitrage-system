@@ -267,7 +267,7 @@ docker compose -f docker-compose.full.yml logs --tail=100 hft-bot
 docker compose -f docker-compose.full.yml exec hft-bot bash
 
 # Access database
-docker compose -f docker-compose.full.yml exec postgres psql -U hftbot -d hft_bot
+docker compose -f docker-compose.full.yml exec postgres psql -U hftbot -d hftbot
 
 # Access Redis
 docker compose -f docker-compose.full.yml exec redis redis-cli

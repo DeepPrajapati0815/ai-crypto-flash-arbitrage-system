@@ -155,6 +155,46 @@ abstract contract OracleStalenessGuard {
     }
     
     /**
+     * ✅ AUDIT FIX #2: Validate cross-oracle synchronization
+     * @notice Ensures all oracles in a trade are updated within acceptable time delta
+     * @param oracles Array of oracle addresses
+     * @param timestamps Array of oracle timestamps (must match oracles length)
+     * @param maxDeltaSeconds Maximum allowed time difference between oracles
+     */
+    function _requireSynchronizedOracles(
+        address[] memory oracles,
+        uint256[] memory timestamps,
+        uint256 maxDeltaSeconds
+    ) internal view {
+        require(oracles.length == timestamps.length, "OracleStalenessGuard: Length mismatch");
+        require(oracles.length > 0, "OracleStalenessGuard: Empty oracle array");
+        
+        uint256 minTimestamp = type(uint256).max;
+        uint256 maxTimestamp = 0;
+        
+        // First, validate each oracle individually
+        for (uint256 i = 0; i < oracles.length; i++) {
+            _requireFreshOracle(oracles[i], timestamps[i]);
+            
+            if (timestamps[i] < minTimestamp) {
+                minTimestamp = timestamps[i];
+            }
+            if (timestamps[i] > maxTimestamp) {
+                maxTimestamp = timestamps[i];
+            }
+        }
+        
+        // ✅ CRITICAL: Ensure all oracles updated within same time window
+        uint256 delta = maxTimestamp - minTimestamp;
+        require(delta <= maxDeltaSeconds, "OracleStalenessGuard: Oracle desync detected");
+        
+        emit OraclesSynchronized(oracles, delta);
+    }
+    
+    /// @notice Event emitted when oracles pass synchronization check
+    event OraclesSynchronized(address[] oracles, uint256 timeDelta);
+    
+    /**
      * @notice Check oracle against configured heartbeat
      * @param oracle Oracle address
      * @param oracleTimestamp Timestamp from oracle

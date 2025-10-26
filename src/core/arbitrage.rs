@@ -300,6 +300,9 @@ impl ArbitrageEngine {
                 timestamp: chrono::Utc::now(),
                 confidence,
                 opportunity_type: "Cross-Exchange Arbitrage".to_string(),
+                orderbook_version: 0, // TODO: Get from orderbook manager
+                snapshot_timestamp: chrono::Utc::now(),
+                validity_window_ms: 200, // 200ms validity window
             });
         }
         
@@ -451,6 +454,9 @@ impl ArbitrageEngine {
                             timestamp: chrono::Utc::now(),
                             confidence,
                             opportunity_type: "Triangular Arbitrage (BTC→USDT→ETH→BTC)".to_string(),
+                            orderbook_version: 0, // TODO: Get from orderbook manager
+                            snapshot_timestamp: chrono::Utc::now(),
+                            validity_window_ms: 200, // 200ms validity window
                         });
                     }
                 }

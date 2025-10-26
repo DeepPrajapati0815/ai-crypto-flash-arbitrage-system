@@ -17,6 +17,56 @@ struct FeatureCache {
     computed_at: DateTime<Utc>,
 }
 
+/// ✅ AUDIT FIX #3: Feature quality metrics for graceful degradation
+#[derive(Debug, Clone)]
+pub struct FeatureQualityMetrics {
+    pub data_points: usize,
+    pub required_points: usize,
+    pub quality_score: f32,  // 0.0 = garbage, 1.0 = perfect
+    pub has_sufficient_data: bool,
+    pub warnings: Vec<String>,
+}
+
+impl FeatureQualityMetrics {
+    pub fn perfect(data_points: usize) -> Self {
+        Self {
+            data_points,
+            required_points: data_points,
+            quality_score: 1.0,
+            has_sufficient_data: true,
+            warnings: vec![],
+        }
+    }
+    
+    pub fn degraded(data_points: usize, required: usize, reason: String) -> Self {
+        let quality_score = if data_points >= required {
+            1.0
+        } else if data_points < 5 {
+            0.0  // Unusable
+        } else {
+            // Linear interpolation: 5-26 points → 0.2-1.0 quality
+            0.2 + (0.8 * (data_points - 5) as f32 / (required - 5) as f32)
+        };
+        
+        Self {
+            data_points,
+            required_points: required,
+            quality_score,
+            has_sufficient_data: data_points >= required,
+            warnings: vec![reason],
+        }
+    }
+    
+    pub fn add_warning(&mut self, warning: String) {
+        self.warnings.push(warning);
+    }
+    
+    /// ✅ AUDIT FIX #3: Check if quality is acceptable for trading
+    pub fn is_acceptable(&self, min_quality: f32) -> bool {
+        self.quality_score >= min_quality
+    }
+}
+
 /// PRODUCTION FIX: Historical market data buffer for real technical indicators
 #[derive(Clone)]
 struct MarketDataHistory {
@@ -192,6 +242,62 @@ impl FeatureBridge {
             }
         }
         None
+    }
+    
+    /// ✅ AUDIT FIX #3: Extract features WITH quality metrics for graceful degradation
+    pub async fn extract_features_with_quality(
+        &self,
+        opportunity: &ArbitrageOpportunity,
+    ) -> Result<(Vec<f32>, FeatureQualityMetrics)> {
+        let pair_symbol = opportunity.pair.symbol();
+        let required_periods = 26;
+        
+        // Get historical data and assess quality
+        let (data_points, quality_metrics) = match self.get_historical_data(&pair_symbol, required_periods).await {
+            Some((prices, _volumes)) => {
+                let data_points = prices.len();
+                let metrics = if data_points >= required_periods {
+                    FeatureQualityMetrics::perfect(data_points)
+                } else {
+                    FeatureQualityMetrics::degraded(
+                        data_points,
+                        required_periods,
+                        format!("Only {} of {} required periods available", data_points, required_periods),
+                    )
+                };
+                (data_points, metrics)
+            },
+            None => {
+                let metrics = FeatureQualityMetrics::degraded(
+                    0,
+                    required_periods,
+                    "No historical data available - using fallback".to_string(),
+                );
+                (0, metrics)
+            }
+        };
+        
+        // Extract features normally
+        let mut features = self.compute_features_optimized(opportunity).await?;
+        
+        // ✅ CRITICAL: Scale confidence by data quality to prevent trading on garbage data
+        if features.len() >= 46 {  // Confidence is at index 45
+            let original_confidence = features[45];
+            let quality_scaled_confidence = original_confidence * quality_metrics.quality_score;
+            features[45] = quality_scaled_confidence;
+            
+            tracing::debug!(
+                "Feature quality for {}: {:.1}% ({}/{} data points) - confidence scaled {:.2} → {:.2}",
+                pair_symbol,
+                quality_metrics.quality_score * 100.0,
+                data_points,
+                required_periods,
+                original_confidence,
+                quality_scaled_confidence
+            );
+        }
+        
+        Ok((features, quality_metrics))
     }
     
     /// ✅ PRODUCTION FIX: Wait for historical data warmup before trading
@@ -428,13 +534,17 @@ impl FeatureBridge {
         
         // === Technical Indicators (10) ===
         // PRODUCTION FIX: Use real historical data for technical indicators
+        // ✅ AUDIT FIX #3: Track data quality for graceful degradation
         let pair_symbol = opportunity.pair.symbol();
         let (historical_prices, historical_volumes) = match self.get_historical_data(&pair_symbol, 26).await {
             Some((prices, volumes)) => (prices, volumes),
             None => {
                 // Fallback: insufficient historical data
                 // Return minimal feature set with warnings
-                tracing::warn!("Insufficient historical data for {}. Need 26+ periods for full indicators.", pair_symbol);
+                tracing::warn!(
+                    "⚠️ Insufficient historical data for {}. Need 26+ periods for full indicators. Using fallback.",
+                    pair_symbol
+                );
                 // Use current prices as fallback (suboptimal but safe)
                 (vec![buy_price as f64, sell_price as f64], vec![buy_volume as f64, sell_volume as f64])
             }

@@ -160,6 +160,9 @@ impl MomentumArbitrage {
                 timestamp: Utc::now(),
                 confidence: metrics.momentum_strength,
                 opportunity_type: "Momentum Arbitrage".to_string(),
+                orderbook_version: 0, // TODO: Get from orderbook manager
+                snapshot_timestamp: Utc::now(),
+                validity_window_ms: 200, // 200ms validity window
             };
 
             info!("Found momentum arbitrage opportunity: {} (momentum: {:.3}, direction: {:?})", 

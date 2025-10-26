@@ -49,7 +49,7 @@ fn create_test_config() -> Config {
         },
         database_config: hft_arbitrage_bot::core::config::DatabaseConfig {
             redis_url: "redis://localhost:6379".to_string(),
-            postgres_url: "postgresql://localhost/hft_bot".to_string(),
+            postgres_url: "postgresql://localhost/hftbot".to_string(),
             connection_pool_size: 10,
         },
         monitoring_config: hft_arbitrage_bot::core::config::MonitoringConfig {

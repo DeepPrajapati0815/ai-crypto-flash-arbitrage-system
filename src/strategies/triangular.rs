@@ -161,6 +161,9 @@ impl TriangularArbitrage {
             timestamp: Utc::now(),
             confidence: 0.9, // High confidence for triangular arbitrage
             opportunity_type: "Triangular Arbitrage".to_string(),
+            orderbook_version: 0, // TODO: Get from orderbook manager
+            snapshot_timestamp: Utc::now(),
+            validity_window_ms: 200, // 200ms validity window
         }
     }
 

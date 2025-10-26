@@ -175,7 +175,7 @@ impl Config {
         // Database configuration
         let database_config = DatabaseConfig {
             redis_url: env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string()),
-            postgres_url: env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://localhost/hft_bot".to_string()),
+            postgres_url: env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://localhost/hftbot".to_string()),
             connection_pool_size: 10,
         };
 

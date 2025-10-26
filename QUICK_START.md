@@ -242,7 +242,7 @@ docker compose restart grafana
 docker compose ps postgres
 
 # Test database connection
-docker compose exec postgres psql -U hftbot -d hft_bot -c "SELECT 1;"
+docker compose exec postgres psql -U hftbot -d hftbot -c "SELECT 1;"
 ```
 
 ### Port Already in Use
