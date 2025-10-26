@@ -554,6 +554,15 @@ impl HFTBot {
         // Mark as running
         *self.running.write().await = true;
 
+        // Start Prometheus metrics server
+        let metrics_port = self.config.monitoring_config.metrics_port;
+        tokio::spawn(async move {
+            if let Err(e) = crate::monitoring::prometheus::start_metrics_server(metrics_port).await {
+                error!("Failed to start metrics server: {}", e);
+            }
+        });
+        info!("✅ Metrics server starting on port {}", metrics_port);
+
         // Start WebSocket connections
         self.websocket_manager.start().await?;
 
