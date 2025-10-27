@@ -215,3 +215,233 @@ abigen!(
         }
     ]"#
 );
+
+// FlashArb Production Safe contract interface
+abigen!(
+    FlashArbProductionSafe,
+    r#"[
+        {
+            "inputs": [
+                {"internalType": "address", "name": "asset", "type": "address"},
+                {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                {"internalType": "uint256", "name": "minProfitWei", "type": "uint256"},
+                {"internalType": "uint16", "name": "maxSlippageBps", "type": "uint16"},
+                {"internalType": "bytes", "name": "params", "type": "bytes"}
+            ],
+            "name": "executeFlashArbSafe",
+            "outputs": [{"internalType": "uint256", "name": "profit", "type": "uint256"}],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {"internalType": "address", "name": "asset", "type": "address"},
+                {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                {"internalType": "uint256", "name": "premium", "type": "uint256"},
+                {"internalType": "address", "name": "initiator", "type": "address"},
+                {"internalType": "bytes", "name": "params", "type": "bytes"}
+            ],
+            "name": "executeOperation",
+            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [{"internalType": "address", "name": "submitter", "type": "address"}],
+            "name": "authorizeBundleSubmitter",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [{"internalType": "address", "name": "submitter", "type": "address"}],
+            "name": "revokeBundleSubmitter",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [{"internalType": "bool", "name": "enabled", "type": "bool"}],
+            "name": "setBundleOnlyMode",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [{"internalType": "string", "name": "reason", "type": "string"}],
+            "name": "emergencyPause",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "emergencyUnpause",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getMinProfitWei",
+            "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getFailedAttempts",
+            "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "isEmergencyPaused",
+            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "bundleOnlyMode",
+            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+            "name": "authorizedBundleSubmitters",
+            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ]"#
+);
+
+// FlashArb Base contract interface (tuple-compatible)
+abigen!(
+    FlashArb,
+    r#"[
+        {
+            "inputs": [
+                {"internalType": "address", "name": "asset", "type": "address"},
+                {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                {
+                    "components": [
+                        {"internalType": "uint8", "name": "dexType", "type": "uint8"},
+                        {"internalType": "address", "name": "tokenIn", "type": "address"},
+                        {"internalType": "address", "name": "tokenOut", "type": "address"},
+                        {"internalType": "uint32", "name": "poolFee", "type": "uint32"},
+                        {"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+                        {"internalType": "uint256", "name": "minAmountOut", "type": "uint256"}
+                    ],
+                    "internalType": "struct TradeRoute[]",
+                    "name": "tuples",
+                    "type": "tuple[]"
+                }
+            ],
+            "name": "executeFlashArbitrage",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {"internalType": "address", "name": "asset", "type": "address"},
+                {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                {"internalType": "uint256", "name": "premium", "type": "uint256"},
+                {"internalType": "address", "name": "initiator", "type": "address"},
+                {"internalType": "bytes", "name": "params", "type": "bytes"}
+            ],
+            "name": "executeOperation",
+            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [{"internalType": "address", "name": "executor", "type": "address"}],
+            "name": "authorizeExecutor",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [{"internalType": "address", "name": "executor", "type": "address"}],
+            "name": "revokeExecutor",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "pause",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "unpause",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "emergencyPause",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "emergencyUnpause",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "owner",
+            "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "paused",
+            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "emergencyPaused",
+            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+            "name": "authorizedExecutors",
+            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "minProfitBps",
+            "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "maxGasPrice",
+            "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ]"#
+);

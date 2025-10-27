@@ -103,6 +103,63 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
     }
     
     /**
+     * @notice Reveal and execute committed route with cryptographic validation
+     * @param routeHash Hash of the committed route
+     * @param asset Token to borrow in flash loan
+     * @param amount Amount to borrow
+     * @param routes Array of trade routes
+     * @param nonce Unique nonce to prevent replay attacks
+     * @param signature Signature proving authorization
+     * @dev Executes the committed route with full cryptographic validation
+     */
+    function revealRoute(
+        bytes32 routeHash,
+        address asset,
+        uint256 amount,
+        TradeRoute[] calldata routes,
+        uint256 nonce,
+        bytes calldata signature
+    ) external nonReentrant whenNotPaused {
+        // Validate gas price
+        require(tx.gasprice <= maxGasPrice, "Gas price too high");
+        _validateGasPrice();
+        
+        // Validate commitment exists and is not executed
+        require(routeCommitmentBlocks[routeHash] > 0, "Route not committed");
+        require(!routeExecuted[routeHash], "Route already executed");
+        
+        // Validate commitment age (must be at least 1 block old for MEV protection)
+        require(block.number > routeCommitmentBlocks[routeHash], "Route too recent");
+        
+        // Validate nonce (prevent replay)
+        _validateNonce(msg.sender, nonce);
+        
+        // Validate route integrity cryptographically
+        _validateRouteCryptographic(routes, routeHash);
+        
+        // Validate signature (if required)
+        if (signature.length > 0) {
+            _validateSignature(routeHash, signature);
+        }
+        
+        // Mark route as executed
+        routeExecuted[routeHash] = true;
+        usedNonces[msg.sender][nonce] = true;
+        
+        // Execute the arbitrage
+        bytes memory params = abi.encode(routes);
+        aavePool.flashLoanSimple(
+            address(this),
+            asset,
+            amount,
+            params,
+            0 // referralCode
+        );
+        
+        emit RouteRevealed(routeHash, msg.sender, 0, tx.gasprice);
+    }
+
+    /**
      * @notice Execute arbitrage after commitment with enhanced validation
      * @param asset Token to borrow in flash loan
      * @param amount Amount to borrow

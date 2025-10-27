@@ -140,6 +140,12 @@ contract FlashArbProductionSafe is FlashArbOptimized {
     /**
      * @notice Execute flash arbitrage with comprehensive safety checks
      * @dev Production-hardened version with explicit validation at every step
+     * @param asset Token to borrow in flash loan
+     * @param amount Amount to borrow
+     * @param minProfitWei Minimum profit required (in wei)
+     * @param maxSlippageBps Maximum slippage allowed (basis points)
+     * @param params Encoded trade routes and execution parameters
+     * @return profit Actual profit earned from arbitrage
      */
     function executeFlashArbSafe(
         address asset,
@@ -154,10 +160,10 @@ contract FlashArbProductionSafe is FlashArbOptimized {
         
         uint256 gasBefore = gasleft();
         
-        // Record initial balance
+        // Record initial balance for profit calculation
         uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
         
-        // Execute flash loan
+        // Execute flash loan with real Aave V3 integration
         try IPool(aavePool).flashLoanSimple(
             address(this),
             asset,
@@ -165,7 +171,7 @@ contract FlashArbProductionSafe is FlashArbOptimized {
             params,
             0 // referralCode
         ) {
-            // Flash loan succeeded
+            // Flash loan succeeded - validate execution results
             uint256 balanceAfter = IERC20(asset).balanceOf(address(this));
             
             // ✅ CRITICAL: Validate profit AFTER execution
@@ -184,12 +190,12 @@ contract FlashArbProductionSafe is FlashArbOptimized {
             return profitEarned;
             
         } catch Error(string memory reason) {
-            // Flash loan failed
+            // Flash loan failed - handle gracefully
             failedAttempts++;
             
             emit ArbitrageFailed(asset, amount, reason);
             
-            // Circuit breaker
+            // Circuit breaker activation
             if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
                 emergencyPaused = true;
                 emit CircuitBreakerTriggered(failedAttempts);
@@ -208,7 +214,7 @@ contract FlashArbProductionSafe is FlashArbOptimized {
                 emit CircuitBreakerTriggered(failedAttempts);
             }
             
-            // Revert with low-level data
+            // Revert with low-level data for debugging
             assembly {
                 revert(add(lowLevelData, 32), mload(lowLevelData))
             }
@@ -248,7 +254,13 @@ contract FlashArbProductionSafe is FlashArbOptimized {
     
     /**
      * @notice Aave flash loan callback with production safety
-     * @dev Overrides base implementation with explicit checks
+     * @dev Overrides base implementation with explicit checks and real DEX integration
+     * @param asset Token borrowed in flash loan
+     * @param amount Amount borrowed
+     * @param premium Flash loan fee
+     * @param initiator Address that initiated the flash loan
+     * @param params Encoded trade routes and execution parameters
+     * @return success Whether the operation succeeded
      */
     function executeOperation(
         address asset,
@@ -260,8 +272,17 @@ contract FlashArbProductionSafe is FlashArbOptimized {
         require(msg.sender == aavePool, "Caller must be Aave pool");
         require(initiator == address(this), "Initiator must be this contract");
         
-        // Decode swap parameters
-        // (Implementation depends on your route encoding)
+        // Decode execution parameters from Rust
+        (uint8[] memory dexTypes, address[] memory tokensIn, address[] memory tokensOut, 
+         uint32[] memory poolFees, uint256[] memory amountsIn, uint256[] memory minAmountsOut) = 
+         abi.decode(params, (uint8[], address[], address[], uint32[], uint256[], uint256[]));
+        
+        // Validate parameter arrays have matching lengths
+        require(dexTypes.length == tokensIn.length, "Array length mismatch");
+        require(tokensIn.length == tokensOut.length, "Array length mismatch");
+        require(tokensOut.length == poolFees.length, "Array length mismatch");
+        require(poolFees.length == amountsIn.length, "Array length mismatch");
+        require(amountsIn.length == minAmountsOut.length, "Array length mismatch");
         
         // Calculate total amount to repay
         uint256 totalDebt = amount + premium;
@@ -270,8 +291,26 @@ contract FlashArbProductionSafe is FlashArbOptimized {
         uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
         require(balanceBefore >= amount, "Insufficient flash loan amount received");
         
-        // Execute arbitrage swaps
-        // ... swap logic here ...
+        // Execute arbitrage swaps with real DEX integration
+        for (uint256 i = 0; i < dexTypes.length; i++) {
+            uint8 dexType = dexTypes[i];
+            address tokenIn = tokensIn[i];
+            address tokenOut = tokensOut[i];
+            uint32 poolFee = poolFees[i];
+            uint256 amountIn = amountsIn[i];
+            uint256 minAmountOut = minAmountsOut[i];
+            
+            // Execute swap based on DEX type
+            if (dexType == 0) {
+                // Uniswap V3 swap
+                _executeUniswapV3Swap(tokenIn, tokenOut, poolFee, amountIn, minAmountOut);
+            } else if (dexType == 1) {
+                // Sushiswap swap
+                _executeSushiswapSwap(tokenIn, tokenOut, amountIn, minAmountOut);
+            } else {
+                revert("Unsupported DEX type");
+            }
+        }
         
         // ✅ CRITICAL: Post-execution validation
         uint256 balanceAfter = IERC20(asset).balanceOf(address(this));
@@ -287,13 +326,77 @@ contract FlashArbProductionSafe is FlashArbOptimized {
         return true;
     }
     
+    /**
+     * @notice Execute Uniswap V3 swap with real contract integration
+     * @dev Uses actual Uniswap V3 Router contract
+     */
+    function _executeUniswapV3Swap(
+        address tokenIn,
+        address tokenOut,
+        uint32 poolFee,
+        uint256 amountIn,
+        uint256 minAmountOut
+    ) internal {
+        // Approve Uniswap V3 Router
+        IERC20(tokenIn).approve(address(uniswapV3Router), amountIn);
+        
+        // Build exactInputSingle parameters
+        IUniswapV3Router.ExactInputSingleParams memory params = IUniswapV3Router.ExactInputSingleParams({
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
+            fee: poolFee,
+            recipient: address(this),
+            deadline: block.timestamp + 300, // 5 minute deadline
+            amountIn: amountIn,
+            amountOutMinimum: minAmountOut,
+            sqrtPriceLimitX96: 0 // No price limit
+        });
+        
+        // Execute swap
+        uint256 amountOut = uniswapV3Router.exactInputSingle(params);
+        
+        // Validate slippage
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+    }
+    
+    /**
+     * @notice Execute Sushiswap swap with real contract integration
+     * @dev Uses actual Sushiswap Router contract
+     */
+    function _executeSushiswapSwap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 minAmountOut
+    ) internal {
+        // Approve Sushiswap Router
+        IERC20(tokenIn).approve(address(sushiswapRouter), amountIn);
+        
+        // Build swap path
+        address[] memory path = new address[](2);
+        path[0] = tokenIn;
+        path[1] = tokenOut;
+        
+        // Execute swap
+        uint256[] memory amounts = sushiswapRouter.swapExactTokensForTokens(
+            amountIn,
+            minAmountOut,
+            path,
+            address(this),
+            block.timestamp + 300 // 5 minute deadline
+        );
+        
+        // Validate slippage
+        require(amounts[1] >= minAmountOut, "Slippage exceeded");
+    }
+    
     // ==================== ADMIN FUNCTIONS ====================
     
-    function authorizeBundle Submitter(address submitter) external onlyOwner {
+    function authorizeBundleSubmitter(address submitter) external onlyOwner {
         authorizedBundleSubmitters[submitter] = true;
     }
     
-    function revokeBundle Submitter(address submitter) external onlyOwner {
+    function revokeBundleSubmitter(address submitter) external onlyOwner {
         authorizedBundleSubmitters[submitter] = false;
     }
     

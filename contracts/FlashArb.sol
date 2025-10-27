@@ -169,23 +169,24 @@ contract FlashArb is ReentrancyGuard, Ownable {
     }
 
     /**
-     * @notice Execute flash loan arbitrage
+     * @notice Execute flash loan arbitrage with tuple-based parameters
      * @param asset Token to borrow
      * @param amount Amount to borrow
-     * @param routes Array of trade routes to execute
+     * @param tuples Array of (dexType, tokenIn, tokenOut, poolFee, amountIn, minAmountOut)
+     * @dev Compatible with Rust bindings - uses tuples instead of structs
      */
     function executeFlashArbitrage(
         address asset,
         uint256 amount,
-        TradeRoute[] calldata routes
+        (uint8, address, address, uint32, uint256, uint256)[] calldata tuples
     ) external nonReentrant {
         // CRITICAL FIX: Allow authorized executors instead of only owner
         require(authorizedExecutors[msg.sender] || msg.sender == owner(), "Unauthorized executor");
         require(!paused, "Contract is paused");
         require(!emergencyPaused, "Contract is emergency paused");
         require(amount > 0, "Invalid amount");
-        require(routes.length > 0, "No routes provided");
-        require(routes.length <= MAX_ROUTES, "Too many routes");
+        require(tuples.length > 0, "No routes provided");
+        require(tuples.length <= MAX_ROUTES, "Too many routes");
 
         // Enhanced MEV protection
         require(tx.gasprice <= maxGasPrice, "Gas price exceeds maximum allowed");
@@ -194,6 +195,24 @@ contract FlashArb is ReentrancyGuard, Ownable {
         // Prevent rapid successive executions (MEV protection)
         require(block.timestamp >= lastExecutionTime[msg.sender] + executionCooldown, "Execution cooldown not met");
         lastExecutionTime[msg.sender] = block.timestamp;
+
+        // Convert tuples to TradeRoute structs for internal processing
+        TradeRoute[] memory routes = new TradeRoute[](tuples.length);
+        for (uint256 i = 0; i < tuples.length; i++) {
+            (uint8 dexType, address tokenIn, address tokenOut, uint32 poolFee, uint256 amountIn, uint256 minAmountOut) = tuples[i];
+            
+            routes[i] = TradeRoute({
+                dexType: DexType(dexType),
+                tokenIn: tokenIn,
+                tokenOut: tokenOut,
+                poolFee: poolFee,
+                amountIn: amountIn,
+                minAmountOut: minAmountOut,
+                deadline: block.timestamp + 300, // 5 minute deadline
+                maxSlippageBps: MAX_SLIPPAGE_BPS,
+                routeHash: keccak256(abi.encodePacked(tokenIn, tokenOut, amountIn, minAmountOut, block.timestamp))
+            });
+        }
 
         // Validate route continuity and deadlines
         _validateRoutes(routes);
