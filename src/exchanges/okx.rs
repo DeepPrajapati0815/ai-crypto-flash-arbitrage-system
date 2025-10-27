@@ -12,7 +12,7 @@ use tracing::info;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use base64;
+use base64::{Engine as _, engine::general_purpose};
 use serde_json;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -48,7 +48,7 @@ impl OKXConnector {
         let mut mac = HmacSha256::new_from_slice(self.config.secret_key.as_bytes())
             .expect("HMAC can take key of any size");
         mac.update(message.as_bytes());
-        base64::encode(mac.finalize().into_bytes())
+        general_purpose::STANDARD.encode(mac.finalize().into_bytes())
     }
 }
 
@@ -140,7 +140,7 @@ impl OKXOrderManager {
         let mut mac = HmacSha256::new_from_slice(self.config.secret_key.as_bytes())
             .expect("HMAC can take key of any size");
         mac.update(message.as_bytes());
-        base64::encode(mac.finalize().into_bytes())
+        general_purpose::STANDARD.encode(mac.finalize().into_bytes())
     }
 
     /// Get server time

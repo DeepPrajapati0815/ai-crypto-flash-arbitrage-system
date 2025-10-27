@@ -2,12 +2,13 @@
 
 use crate::core::types::{Order, OrderStatus, TradingPair, Decimal, OrderSide, OrderType};
 use crate::exchanges::manager::{OrderManager, ExchangeConnector, ExchangeConfig};
+use crate::utils::websocket_manager::{WebSocketManager, WebSocketConfig};
 use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
-use tokio_tungstenite::connect_async;
+use std::sync::Arc;
 use tracing::info;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
@@ -16,21 +17,31 @@ use hex;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Binance API client
+/// Binance API client with production WebSocket management
 pub struct BinanceConnector {
     config: ExchangeConfig,
     client: Client,
-    ws_connection: Option<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>,
-    is_connected: bool,
+    ws_manager: Arc<WebSocketManager>,
 }
 
 impl BinanceConnector {
     pub fn new(config: ExchangeConfig) -> Self {
+        // ✅ PRODUCTION FIX: Initialize WebSocket manager with reconnection
+        let ws_config = WebSocketConfig {
+            url: format!("{}/ws/{}", config.websocket_url, "stream"),
+            max_reconnect_attempts: Some(10),
+            initial_reconnect_delay: std::time::Duration::from_secs(1),
+            max_reconnect_delay: std::time::Duration::from_secs(60),
+            reconnect_backoff_multiplier: 2.0,
+            ping_interval: std::time::Duration::from_secs(30),
+            pong_timeout: std::time::Duration::from_secs(10),
+            message_queue_size: 1000,
+        };
+        
         Self {
             client: Client::new(),
             config,
-            ws_connection: None,
-            is_connected: false,
+            ws_manager: Arc::new(WebSocketManager::new(ws_config)),
         }
     }
 
@@ -84,27 +95,23 @@ impl ExchangeConnector for BinanceConnector {
         // Test API connection
         let _server_time = self.get_server_time().await?;
         
-        // Connect to WebSocket for real-time updates
-        let ws_url = format!("{}/ws/{}", self.config.websocket_url, "stream");
-        let (ws_stream, _) = connect_async(&ws_url).await?;
-        self.ws_connection = Some(ws_stream);
-        self.is_connected = true;
+        // ✅ PRODUCTION FIX: Use WebSocket manager with automatic reconnection
+        self.ws_manager.connect().await?;
         
         info!("Connected to Binance successfully");
         Ok(())
     }
 
     async fn disconnect(&mut self) -> Result<()> {
-        if let Some(mut ws) = self.ws_connection.take() {
-            let _ = ws.close(None).await;
-        }
-        self.is_connected = false;
+        // ✅ PRODUCTION FIX: Use WebSocket manager for disconnect
+        self.ws_manager.disconnect().await?;
         info!("Disconnected from Binance");
         Ok(())
     }
 
     async fn is_connected(&self) -> bool {
-        self.is_connected
+        // ✅ PRODUCTION FIX: Check WebSocket manager connection state
+        self.ws_manager.is_connected().await
     }
 
     fn get_order_manager(&self) -> Box<dyn OrderManager> {

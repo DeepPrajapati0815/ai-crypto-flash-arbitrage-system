@@ -672,12 +672,19 @@ def main():
     print("ML ONNX Training Pipeline - Arbitrage Prediction Model")
     print("=" * 60)
     
-    # ✅ PRODUCTION FIX: Load real historical data or use synthetic
+    # ✅ PRODUCTION FIX: Force real data in production (AUDIT COMPLIANCE)
     print("\n1. Loading training data...")
     
-    # Configure data source
-    USE_REAL_DATA = False  # Set True for production
-    DATA_SOURCE = "database"  # or "csv"
+    # Configure data source - PRODUCTION ENFORCEMENT
+    USE_REAL_DATA = os.getenv('USE_REAL_DATA', 'true').lower() == 'true'
+    DATA_SOURCE = os.getenv('DATA_SOURCE', 'database')  # or "csv"
+    
+    # AUDIT VIOLATION CHECK: Prevent synthetic data in production
+    if not USE_REAL_DATA:
+        raise ValueError(
+            "❌ PRODUCTION VIOLATION: Synthetic data not allowed in production. "
+            "Set USE_REAL_DATA=true environment variable."
+        )
     
     if USE_REAL_DATA:
         if DATA_SOURCE == "database":
@@ -692,10 +699,14 @@ def main():
             X, y, timestamps = load_historical_data_from_csv(
                 csv_path="data/historical_ticks.csv"
             )
-    else:
-        print("⚠️ Using SYNTHETIC data (set USE_REAL_DATA=True for production)")
-        X, y, timestamps = generate_synthetic_data(n_samples=10000)
-    print(f"   Generated {len(X)} samples with {X.shape[1]} features")
+    
+    # Validate data quality
+    if len(X) < 10000:
+        raise ValueError(
+            f"❌ INSUFFICIENT DATA: {len(X)} samples (minimum 10,000 required for production)"
+        )
+    
+    print(f"   ✅ Loaded {len(X)} samples with {X.shape[1]} features")
     
     # CRITICAL FIX: Use temporal splitting to prevent data leakage
     print("\n2. Splitting data temporally into train/val/test sets...")
