@@ -14,6 +14,12 @@ contract FlashArbWithTimelock is FlashArb {
     uint256 public constant TIMELOCK_DELAY = 2 days;
     uint256 public constant MIN_TIMELOCK_DELAY = 1 days;
     uint256 public constant MAX_TIMELOCK_DELAY = 7 days;
+    
+    // Import constants from parent
+    uint256 private constant MAX_SLIPPAGE_BPS = 200; // 2%
+    
+    // Required confirmations (from parent contract)
+    uint256 public requiredConfirmations = 2;
 
     // Pending changes mapping: changeHash => executionTime
     mapping(bytes32 => uint256) public pendingChanges;
@@ -52,14 +58,12 @@ contract FlashArbWithTimelock is FlashArb {
      * @param _aavePool Aave V3 pool address
      * @param _uniswapV3Router Uniswap V3 router address
      * @param _sushiswapRouter Sushiswap router address
-     * @param _permit2 Permit2 address
      */
     constructor(
         address _aavePool,
         address _uniswapV3Router,
-        address _sushiswapRouter,
-        address _permit2
-    ) FlashArb(_aavePool, _uniswapV3Router, _sushiswapRouter, _permit2) {}
+        address _sushiswapRouter
+    ) FlashArb(_aavePool, _uniswapV3Router, _sushiswapRouter) {}
 
     // ==================== TIMELOCK FUNCTIONS ====================
 
@@ -73,7 +77,7 @@ contract FlashArbWithTimelock is FlashArb {
         bytes32 changeHash,
         ChangeType changeType,
         bytes memory encodedData
-    ) external onlyOwner {
+    ) public onlyOwner {
         require(pendingChanges[changeHash] == 0, "Change already queued");
         
         uint256 executionTime = block.timestamp + TIMELOCK_DELAY;

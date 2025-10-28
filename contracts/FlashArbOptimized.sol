@@ -2,6 +2,7 @@
 pragma solidity ^0.8.17;
 
 import "./FlashArbWithTimelock.sol";
+import "./libraries/SafeERC20.sol";
 
 /**
  * @title FlashArbOptimized
@@ -16,6 +17,9 @@ import "./FlashArbWithTimelock.sol";
  * Gas Savings Estimation: ~15-30% reduction in gas costs per transaction
  */
 contract FlashArbOptimized is FlashArbWithTimelock {
+    
+    // Constants for basis points calculations
+    uint256 private constant BPS_BASE = 10000;
     
     /**
      * @notice Optimized trade route structure with packed storage
@@ -59,7 +63,7 @@ contract FlashArbOptimized is FlashArbWithTimelock {
         address _uniswapV3Router,
         address _sushiswapRouter,
         address _permit2
-    ) FlashArbWithTimelock(_aavePool, _uniswapV3Router, _sushiswapRouter, _permit2) {
+    ) FlashArbWithTimelock(_aavePool, _uniswapV3Router, _sushiswapRouter) {
         // Initialize optimized parameters
         arbParams = OptimizedArbParams({
             minProfitWei: 0.001 ether,
@@ -173,7 +177,7 @@ contract FlashArbOptimized is FlashArbWithTimelock {
         
         unchecked {
             for (uint256 i = 0; i < length; ++i) {
-                IERC20(tokens[i]).safeApprove(spenders[i], amounts[i]);
+                SafeERC20.safeApprove(IERC20(tokens[i]), spenders[i], amounts[i]);
             }
         }
     }

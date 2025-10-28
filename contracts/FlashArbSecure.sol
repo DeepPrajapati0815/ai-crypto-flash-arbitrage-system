@@ -30,11 +30,7 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
     /// @notice Maximum block delay between commit and reveal (blocks, not seconds)
     uint256 public constant MAX_COMMIT_BLOCKS = 10; // ~2 minutes (12s blocks, reduced for opportunity freshness)
     
-    /// @notice Maximum gas price for execution (in gwei)
-    uint256 public maxGasPrice = 500 gwei;
-    
-    /// @notice Gas price oracle tolerance (percentage)
-    uint256 public gasPriceTolerance = 150; // 150% of base fee
+    // Gas price variables inherited from parent FlashArb contract
     
     /// @notice Route expiration time (seconds from commitment)
     uint256 public routeExpiration = 600; // 10 minutes
@@ -78,9 +74,8 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
     constructor(
         address _aavePool,
         address _uniswapV3Router,
-        address _sushiswapRouter,
-        address _permit2
-    ) FlashArb(_aavePool, _uniswapV3Router, _sushiswapRouter, _permit2) {
+        address _sushiswapRouter
+    ) FlashArb(_aavePool, _uniswapV3Router, _sushiswapRouter) {
         // ✅ ISSUE #6 FIX: Cache chain ID during deployment (saves ~100 gas per hash computation)
         CHAIN_ID = block.chainid;
     }
@@ -93,9 +88,11 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
      * @dev First step of commit-reveal pattern for MEV protection
      */
     // ✅ ISSUE #4 FIX: Store block number instead of timestamp (miner-proof)
-    function commitRoute(bytes32 routeHash) external nonReentrant whenNotPaused {
+    function commitRoute(bytes32 routeHash) external nonReentrant {
         require(routeHash != bytes32(0), "Invalid route hash");
         require(routeCommitmentBlocks[routeHash] == 0, "Route already committed");
+        require(!paused, "Contract is paused");
+        require(!emergencyPaused, "Contract is emergency paused");
         
         routeCommitmentBlocks[routeHash] = block.number;
         
@@ -119,7 +116,11 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
         TradeRoute[] calldata routes,
         uint256 nonce,
         bytes calldata signature
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant {
+        // Validate pause state
+        require(!paused, "Contract is paused");
+        require(!emergencyPaused, "Contract is emergency paused");
+        
         // Validate gas price
         require(tx.gasprice <= maxGasPrice, "Gas price too high");
         _validateGasPrice();
@@ -174,7 +175,11 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
         TradeRoute[] calldata routes,
         uint256 nonce,
         bytes calldata signature
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant {
+        // Validate pause state
+        require(!paused, "Contract is paused");
+        require(!emergencyPaused, "Contract is emergency paused");
+        
         // Validate gas price
         require(tx.gasprice <= maxGasPrice, "Gas price too high");
         _validateGasPrice();
@@ -334,7 +339,7 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
      * @param executor Address of executor
      * @param nonce Nonce to validate
      */
-    function _validateNonce(address executor, uint256 nonce) internal view {
+    function _validateNonce(address executor, uint256 nonce) internal {
         require(!usedNonces[executor][nonce], "Nonce already used");
         
         emit RouteReplayPrevented(
@@ -351,7 +356,7 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
     function _validateRouteCryptographic(
         TradeRoute[] calldata routes,
         bytes32 expectedHash
-    ) internal pure {
+    ) internal {
         // Validate route continuity with mathematical proof
         for (uint256 i = 0; i < routes.length; i++) {
             TradeRoute calldata route = routes[i];
@@ -451,7 +456,7 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
      * @notice Validate gas price is within acceptable range
      * @dev Protects against gas price manipulation attacks
      */
-    function _validateGasPrice() internal view {
+    function _validateGasPrice() internal {
         uint256 baseFee = block.basefee;
         
         // Protect against overflow: check if multiplication would overflow
@@ -473,7 +478,7 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
      * @notice Update maximum gas price (owner only)
      * @param newMaxGasPrice New maximum gas price in wei
      */
-    function setMaxGasPrice(uint256 newMaxGasPrice) external onlyOwner {
+    function setMaxGasPrice(uint256 newMaxGasPrice) external override onlyOwner {
         require(newMaxGasPrice > 0, "Invalid gas price");
         maxGasPrice = newMaxGasPrice;
     }
@@ -482,7 +487,7 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
      * @notice Update gas price tolerance (owner only)
      * @param newTolerance New tolerance percentage (e.g., 150 for 150%)
      */
-    function setGasPriceTolerance(uint256 newTolerance) external onlyOwner {
+    function setGasPriceTolerance(uint256 newTolerance) external override onlyOwner {
         require(newTolerance >= 100 && newTolerance <= 300, "Invalid tolerance");
         gasPriceTolerance = newTolerance;
     }
@@ -494,6 +499,8 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
      * @param routeHash Hash of the route to cancel
      */
     function cancelRoute(bytes32 routeHash) external {
+        require(!paused, "Contract is paused");
+        require(!emergencyPaused, "Contract is emergency paused");
         require(
             msg.sender == owner() || routeCommitmentBlocks[routeHash] > 0,  // ✅ Use block number
             "Not authorized"
@@ -574,11 +581,9 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
     ) public view returns (bool isValid) {
         require(price > 0, "Invalid oracle price");
         
-        try this._checkOracleFreshness(oracleTimestamp) returns (bool isFresh, uint256) {
-            return isFresh;
-        } catch {
-            return false;
-        }
+        // Check oracle freshness using inherited function
+        (bool isFresh, ) = _checkOracleFreshness(oracleTimestamp);
+        return isFresh;
     }
     
     /**
@@ -587,7 +592,7 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
      * @return price Latest price (reverts if stale)
      * @dev ✅ AUDIT FIX: Automatically validates staleness before returning price
      */
-    function getChainlinkPriceValidated(address oracle) public view returns (uint256 price) {
+    function getChainlinkPriceValidated(address oracle) public returns (uint256 price) {
         require(oracle != address(0), "Invalid oracle");
         
         (
@@ -618,17 +623,4 @@ contract FlashArbSecure is FlashArb, OracleStalenessGuard {
     }
 }
 
-/// Chainlink oracle interface for staleness validation
-interface IChainlinkOracle {
-    function latestRoundData()
-        external
-        view
-        returns (
-            uint80 roundId,
-            int256 answer,
-            uint256 startedAt,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        );
-}
 

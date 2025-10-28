@@ -2,6 +2,7 @@
 pragma solidity ^0.8.17;
 
 import "./FlashArbOptimized.sol";
+import "./interfaces/IAavePool.sol";
 
 /**
  * @title FlashArbProductionSafe
@@ -16,6 +17,9 @@ import "./FlashArbOptimized.sol";
  */
 contract FlashArbProductionSafe is FlashArbOptimized {
     
+    // Constants for basis points calculations
+    uint256 private constant BPS_BASE = 10000;
+    
     // ==================== PRODUCTION SAFETY ADDITIONS ====================
     
     /// Minimum profit required (absolute, in wei)
@@ -24,8 +28,7 @@ contract FlashArbProductionSafe is FlashArbOptimized {
     /// Maximum slippage allowed (basis points)
     uint16 public constant MAX_SLIPPAGE_BPS = 300; // 3%
     
-    /// Emergency pause flag
-    bool public emergencyPaused;
+    // Emergency pause flag inherited from FlashArb
     
     /// Bundle-only mode (prevent public mempool frontrunning)
     bool public bundleOnlyMode;
@@ -164,7 +167,7 @@ contract FlashArbProductionSafe is FlashArbOptimized {
         uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
         
         // Execute flash loan with real Aave V3 integration
-        try IPool(aavePool).flashLoanSimple(
+        try IAavePool(aavePool).flashLoanSimple(
             address(this),
             asset,
             amount,
@@ -269,7 +272,7 @@ contract FlashArbProductionSafe is FlashArbOptimized {
         address initiator,
         bytes calldata params
     ) external override returns (bool) {
-        require(msg.sender == aavePool, "Caller must be Aave pool");
+        require(msg.sender == address(aavePool), "Caller must be Aave pool");
         require(initiator == address(this), "Initiator must be this contract");
         
         // Decode execution parameters from Rust
@@ -288,25 +291,17 @@ contract FlashArbProductionSafe is FlashArbOptimized {
         uint256 totalDebt = amount + premium;
         
         // ✅ CRITICAL: Pre-execution validation
-        uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
-        require(balanceBefore >= amount, "Insufficient flash loan amount received");
+        require(IERC20(asset).balanceOf(address(this)) >= amount, "Insufficient flash loan amount received");
         
         // Execute arbitrage swaps with real DEX integration
         for (uint256 i = 0; i < dexTypes.length; i++) {
-            uint8 dexType = dexTypes[i];
-            address tokenIn = tokensIn[i];
-            address tokenOut = tokensOut[i];
-            uint32 poolFee = poolFees[i];
-            uint256 amountIn = amountsIn[i];
-            uint256 minAmountOut = minAmountsOut[i];
-            
             // Execute swap based on DEX type
-            if (dexType == 0) {
+            if (dexTypes[i] == 0) {
                 // Uniswap V3 swap
-                _executeUniswapV3Swap(tokenIn, tokenOut, poolFee, amountIn, minAmountOut);
-            } else if (dexType == 1) {
+                _executeUniswapV3Swap(tokensIn[i], tokensOut[i], poolFees[i], amountsIn[i], minAmountsOut[i]);
+            } else if (dexTypes[i] == 1) {
                 // Sushiswap swap
-                _executeSushiswapSwap(tokenIn, tokenOut, amountIn, minAmountOut);
+                _executeSushiswapSwap(tokensIn[i], tokensOut[i], amountsIn[i], minAmountsOut[i]);
             } else {
                 revert("Unsupported DEX type");
             }
@@ -321,7 +316,7 @@ contract FlashArbProductionSafe is FlashArbOptimized {
         require(profit >= MIN_PROFIT_WEI, "Profit below minimum threshold");
         
         // Approve Aave to pull repayment
-        IERC20(asset).approve(aavePool, totalDebt);
+        IERC20(asset).approve(address(aavePool), totalDebt);
         
         return true;
     }
@@ -344,7 +339,7 @@ contract FlashArbProductionSafe is FlashArbOptimized {
         IUniswapV3Router.ExactInputSingleParams memory params = IUniswapV3Router.ExactInputSingleParams({
             tokenIn: tokenIn,
             tokenOut: tokenOut,
-            fee: poolFee,
+            fee: uint24(poolFee),
             recipient: address(this),
             deadline: block.timestamp + 300, // 5 minute deadline
             amountIn: amountIn,

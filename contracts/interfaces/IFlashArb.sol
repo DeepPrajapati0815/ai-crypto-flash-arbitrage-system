@@ -95,17 +95,27 @@ interface IFlashArbSecure {
     function isRouteExecutable(bytes32 routeHash) external view returns (bool);
 }
 
+// ArbitrageTuple struct for interfaces
+struct ArbitrageTuple {
+    uint8 dexType;
+    address tokenIn;
+    address tokenOut;
+    uint32 poolFee;
+    uint256 amountIn;
+    uint256 minAmountOut;
+}
+
 /**
  * @title IFlashArbBase
  * @notice Interface for base flash arbitrage contract
- * @dev Compatible with Rust bindings using tuple parameters
+ * @dev Compatible with Rust bindings using struct parameters
  */
 interface IFlashArbBase {
-    // Main execution method (Rust-compatible with tuples)
+    // Main execution method (Rust-compatible with structs)
     function executeFlashArbitrage(
         address asset,
         uint256 amount,
-        (uint8, address, address, uint32, uint256, uint256)[] calldata tuples
+        ArbitrageTuple[] calldata tuples
     ) external;
 
     // Aave callback

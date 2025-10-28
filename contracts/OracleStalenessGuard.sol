@@ -145,7 +145,7 @@ abstract contract OracleStalenessGuard {
      * @param oracle Oracle address (for logging)
      * @param oracleTimestamp Timestamp from oracle
      */
-    function _requireFreshOracle(address oracle, uint256 oracleTimestamp) internal view {
+    function _requireFreshOracle(address oracle, uint256 oracleTimestamp) internal {
         (bool isFresh, uint256 age) = _checkOracleFreshness(oracleTimestamp);
         
         if (!isFresh) {
@@ -165,7 +165,7 @@ abstract contract OracleStalenessGuard {
         address[] memory oracles,
         uint256[] memory timestamps,
         uint256 maxDeltaSeconds
-    ) internal view {
+    ) internal {
         require(oracles.length == timestamps.length, "OracleStalenessGuard: Length mismatch");
         require(oracles.length > 0, "OracleStalenessGuard: Empty oracle array");
         
@@ -199,7 +199,7 @@ abstract contract OracleStalenessGuard {
      * @param oracle Oracle address
      * @param oracleTimestamp Timestamp from oracle
      */
-    function _requireWithinHeartbeat(address oracle, uint256 oracleTimestamp) internal view {
+    function _requireWithinHeartbeat(address oracle, uint256 oracleTimestamp) internal {
         uint256 heartbeat = oracleHeartbeats[oracle];
         
         if (heartbeat == 0) {
@@ -232,7 +232,7 @@ abstract contract OracleStalenessGuard {
         int256 answer,
         uint256 updatedAt,
         uint80 answeredInRound
-    ) internal view {
+    ) internal {
         require(answer > 0, "Invalid oracle price");
         require(roundId > 0, "Invalid round ID");
         require(updatedAt > 0, "Invalid update timestamp");
@@ -274,7 +274,7 @@ contract SafeOracleConsumer is OracleStalenessGuard {
      * @param oracle Chainlink price feed address
      * @return price Latest price (scaled by oracle decimals)
      */
-    function getChainlinkPrice(address oracle) public view returns (uint256 price) {
+    function getChainlinkPrice(address oracle) public returns (uint256 price) {
         require(oracle != address(0), "Invalid oracle address");
         
         (
