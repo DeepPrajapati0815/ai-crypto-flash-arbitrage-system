@@ -247,7 +247,10 @@ impl Config {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<()> {
-        if self.exchanges.is_empty() {
+        // Allow running without centralized exchanges unless explicitly required
+        // Set REQUIRE_CEX=true to enforce CEX configuration
+        let require_cex = std::env::var("REQUIRE_CEX").unwrap_or_else(|_| "false".to_string()) == "true";
+        if require_cex && self.exchanges.is_empty() {
             return Err(anyhow::anyhow!("No exchanges configured"));
         }
 

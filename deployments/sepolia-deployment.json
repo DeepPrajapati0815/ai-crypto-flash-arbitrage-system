@@ -1,0 +1,15 @@
+{
+  "network": "sepolia",
+  "timestamp": "2025-10-30T14:26:50.804Z",
+  "deployer": "0x06C107E047ab8641510E689bE3F25afBD13F5D5e",
+  "contracts": {
+    "FlashArbProductionSafe": "0xF4a6581a9D79AD5F713afD6647E174cC14961123"
+  },
+  "addresses": {
+    "aavePool": "0x012bAC54348C0E635dCAc9D5FB99f06F24136C9A",
+    "weth": "0x387d311e47e80b498169e6fb51d3193167d89F7D",
+    "uniswapV3Router": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+    "uniswapV3Factory": "0x0227628f3F023bb0B980b67D528571c95c6DaC1c",
+    "sushiswapRouter": "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"
+  }
+}
