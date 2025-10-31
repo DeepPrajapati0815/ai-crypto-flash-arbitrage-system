@@ -251,11 +251,12 @@ impl UniswapOrderManager {
         let tx_hash = format!("{:?}", pending_tx.tx_hash());
         
         info!(
-            "✅ Uniswap V3 swap executed: {} {} -> {} {} (tx: {})", 
-            order.quantity, 
-            order.pair.base, 
-            expected_out, 
-            order.pair.quote,
+            target: "dex.flow",
+            "Uniswap V3 swap submitted: side={:?}, pair={}, qty={}, min_out={}, fee_bps=30, tx={}",
+            order.side,
+            order.pair.symbol(),
+            order.quantity,
+            min_amount_out,
             tx_hash
         );
         

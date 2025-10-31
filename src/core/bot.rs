@@ -66,6 +66,7 @@ pub struct HFTBot {
     evm_provider: Option<Arc<Provider<Http>>>,
     route_builder: Arc<RouteBuilder>,
     token_resolver: Arc<TokenResolver>,
+    market_ticker_tx: Option<mpsc::Sender<crate::core::types::Ticker>>,
 }
 
 impl HFTBot {
@@ -218,7 +219,7 @@ impl HFTBot {
 
         // Create ticker channel and register with WebSocketManager
         let (ticker_tx, mut ticker_rx) = mpsc::channel::<crate::core::types::Ticker>(1000);
-        websocket_manager.set_ticker_sender(ticker_tx).await;
+        websocket_manager.set_ticker_sender(ticker_tx.clone()).await;
         // Downstream feature and prediction channels
         let (features_tx, mut features_rx) = mpsc::channel::<crate::core::types::FeatureSample>(2048);
         let (predictions_tx, mut predictions_rx) = mpsc::channel::<(String, f64)>(2048);
@@ -544,6 +545,7 @@ impl HFTBot {
             evm_provider,
             route_builder,
             token_resolver,
+            market_ticker_tx: Some(ticker_tx),
         })
     }
 
@@ -563,8 +565,25 @@ impl HFTBot {
         });
         info!("✅ Metrics server starting on port {}", metrics_port);
 
-        // Start WebSocket connections
-        self.websocket_manager.start().await?;
+        // Start market data
+        info!("🔍 DEX_ONLY flag: {}", self.config.dex_only);
+        if self.config.dex_only {
+            // DEX realtime (on-chain heads/logs)
+            let dex_cfg = crate::market_data::dex_realtime::DexRealtimeConfig {
+                fee_tier: 3000,
+                wss_url: if self.config.evm_config.rpc_wss_url.is_empty() { None } else { Some(self.config.evm_config.rpc_wss_url.clone()) },
+                    multicall3_address: Address::from_str("0xcA11bde05977b3631167028862bE2a173976CA11")?, // Multicall3 (same on all networks)
+            };
+            let dex = crate::market_data::dex_realtime::DexRealtime::new(Arc::new(self.config.clone()), dex_cfg).await?;
+            if let Some(ref tx) = self.market_ticker_tx {
+                dex.set_ticker_sender(tx.clone()).await;
+            }
+            dex.start().await?;
+            info!("✅ DEX realtime data collection started");
+        } else {
+            // CEX websockets
+            self.websocket_manager.start().await?;
+        }
 
         // ✅ ISSUE #1 FIX: Wait for historical data warmup before trading
         info!("⏳ Starting historical data warmup (26 periods for MACD)...");

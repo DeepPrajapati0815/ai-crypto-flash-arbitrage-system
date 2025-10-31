@@ -83,12 +83,16 @@ impl ExecutionEngine {
         for config in exchange_configs {
             match config.name.as_str() {
                 "binance" => {
-                    let connector = crate::exchanges::BinanceConnector::new(config);
-                    manager.add_connector("binance".to_string(), Box::new(connector)).await?;
+                    // Disabled CEX (Binance) for DEX-only testing
+                    // let connector = crate::exchanges::BinanceConnector::new(config);
+                    // manager.add_connector("binance".to_string(), Box::new(connector)).await?;
+                    info!("Binance connector disabled for DEX-only testing");
                 },
                 "okx" => {
-                    let connector = crate::exchanges::OKXConnector::new(config);
-                    manager.add_connector("okx".to_string(), Box::new(connector)).await?;
+                    // Disabled CEX (OKX) for DEX-only testing
+                    // let connector = crate::exchanges::OKXConnector::new(config);
+                    // manager.add_connector("okx".to_string(), Box::new(connector)).await?;
+                    info!("OKX connector disabled for DEX-only testing");
                 },
                 "uniswap" => {
                     // For Uniswap, we need additional parameters
@@ -113,6 +117,20 @@ impl ExecutionEngine {
     /// Execute an arbitrage opportunity with proper memory management
     pub async fn execute_opportunity(&self, opportunity: &ArbitrageOpportunity) -> Result<String> {
         info!("Executing arbitrage opportunity: {}", opportunity.id);
+
+        // DEX flow visibility for testing: highlight Uniswap routes
+        let is_dex_buy = opportunity.buy_exchange.to_lowercase().contains("uni");
+        let is_dex_sell = opportunity.sell_exchange.to_lowercase().contains("uni");
+        if is_dex_buy || is_dex_sell {
+            debug!(
+                "DEX flow: buy_on_uniswap={}, sell_on_uniswap={}, pair={}, qty={}, est_profit={}",
+                is_dex_buy,
+                is_dex_sell,
+                opportunity.pair.symbol(),
+                opportunity.max_quantity,
+                opportunity.profit_amount
+            );
+        }
 
         // Check if we can handle more orders
         let active_count = self.active_orders.read().await.len();
@@ -169,6 +187,14 @@ impl ExecutionEngine {
             match (buy_result, sell_result) {
                 (Ok(_), Ok(_)) => {
                     // Both orders succeeded
+                    if is_dex_buy || is_dex_sell {
+                        info!(
+                            "DEX flow complete: buy_ex={}, sell_ex={}, opp_id={}",
+                            opportunity.buy_exchange,
+                            opportunity.sell_exchange,
+                            opportunity.id
+                        );
+                    }
                     Ok(())
                 },
                 (Err(buy_err), Ok(_)) => {

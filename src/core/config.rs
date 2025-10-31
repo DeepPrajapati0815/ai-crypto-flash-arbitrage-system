@@ -19,6 +19,9 @@ pub struct Config {
     pub performance_config: PerformanceConfig,
     pub evm_config: EvmConfig,
     pub mev_config: MevConfig,
+    /// Enable pure DEX market data mode (on-chain heads/logs)
+    #[serde(default)]
+    pub dex_only: bool,
 }
 
 /// WebSocket configuration
@@ -60,6 +63,9 @@ pub struct PerformanceConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvmConfig {
     pub rpc_url: String,
+    /// Optional WebSocket RPC for newHeads/logs
+    #[serde(default)]
+    pub rpc_wss_url: String,
     pub chain_id: u64,
     pub wallet_private_key: String,
     pub flash_arb_contract: String,
@@ -210,6 +216,7 @@ impl Config {
         // EVM configuration
         let evm_config = EvmConfig {
             rpc_url: env::var("EVM_RPC_URL").unwrap_or_else(|_| "https://eth.llamarpc.com".to_string()),
+            rpc_wss_url: env::var("EVM_RPC_WSS_URL").unwrap_or_else(|_| "".to_string()),
             chain_id: env::var("EVM_CHAIN_ID").unwrap_or_else(|_| "1".to_string()).parse().unwrap_or(1),
             wallet_private_key: env::var("EVM_PRIVATE_KEY").unwrap_or_else(|_| "".to_string()),
             flash_arb_contract: env::var("FLASH_ARB_ADDRESS").unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string()),
@@ -242,6 +249,7 @@ impl Config {
             performance_config,
             evm_config,
             mev_config,
+            dex_only: env::var("DEX_ONLY").unwrap_or_else(|_| "false".to_string()) == "true",
         })
     }
 

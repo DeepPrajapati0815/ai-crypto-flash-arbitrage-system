@@ -61,14 +61,16 @@ impl WebSocketManager {
         info!("Starting WebSocket connections...");
 
         // Connect to Binance WebSocket
-        if self.config.exchanges.contains_key("binance") {
-            self.connect_binance().await?;
-        }
+        // NOTE: Disabled CEX (Binance) for DEX-only testing
+        // if self.config.exchanges.contains_key("binance") {
+        //     self.connect_binance().await?;
+        // }
 
         // Connect to OKX WebSocket
-        if self.config.exchanges.contains_key("okx") {
-            self.connect_okx().await?;
-        }
+        // NOTE: Disabled CEX (OKX) for DEX-only testing
+        // if self.config.exchanges.contains_key("okx") {
+        //     self.connect_okx().await?;
+        // }
 
         info!("WebSocket connections started");
         Ok(())

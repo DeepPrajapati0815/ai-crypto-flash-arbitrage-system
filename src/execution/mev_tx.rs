@@ -41,27 +41,40 @@ impl TokenResolver {
     
     /// Create new token resolver with default mainnet addresses (backward compatibility)
     pub fn new() -> Self {
+        fn env_or_default_clean(key: &str, default_val: &str) -> String {
+            match std::env::var(key) {
+                Ok(val) if !val.trim().is_empty() => val.trim().to_string(),
+                _ => default_val.to_string(),
+            }
+        }
+
+        fn parse_addr(symbol: &str, raw: &str) -> Option<(String, Address)> {
+            match Address::from_str(raw) {
+                Ok(addr) => Some((symbol.to_string(), addr)),
+                Err(e) => {
+                    tracing::error!(target: "mev.token_resolver", "Invalid address for {}: '{}' ({})", symbol, raw, e);
+                    None
+                }
+            }
+        }
+
         let mut addresses = std::collections::HashMap::new();
-        
-        // Get addresses from environment variables with fallbacks
-        addresses.insert("WETH".to_string(), 
-            Address::from_str(&std::env::var("WETH_ADDRESS")
-                .unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string())).unwrap());
-        addresses.insert("USDT".to_string(), 
-            Address::from_str(&std::env::var("USDT_ADDRESS")
-                .unwrap_or_else(|_| "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string())).unwrap());
-        addresses.insert("USDC".to_string(), 
-            Address::from_str(&std::env::var("USDC_ADDRESS")
-                .unwrap_or_else(|_| "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string())).unwrap());
-        addresses.insert("DAI".to_string(), 
-            Address::from_str(&std::env::var("DAI_ADDRESS")
-                .unwrap_or_else(|_| "0x6B175474E89094C44Da98b954EedeAC495271d0F".to_string())).unwrap());
-        addresses.insert("WBTC".to_string(), 
-            Address::from_str(&std::env::var("WBTC_ADDRESS")
-                .unwrap_or_else(|_| "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599".to_string())).unwrap());
-        
-        tracing::warn!("⚠️ Using default mainnet token addresses. Consider using from_config() for production.");
-        
+
+        // Fallbacks default to mainnet addresses; env overrides must be valid 0x hex or will be ignored safely
+        let weth = env_or_default_clean("WETH_ADDRESS", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+        let usdt = env_or_default_clean("USDT_ADDRESS", "0xdAC17F958D2ee523a2206206994597C13D831ec7");
+        let usdc = env_or_default_clean("USDC_ADDRESS", "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+        let dai  = env_or_default_clean("DAI_ADDRESS",  "0x6B175474E89094C44Da98b954EedeAC495271d0F");
+        let wbtc = env_or_default_clean("WBTC_ADDRESS", "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599");
+
+        for (sym, raw) in [("WETH", &weth), ("USDT", &usdt), ("USDC", &usdc), ("DAI", &dai), ("WBTC", &wbtc)] {
+            if let Some((k, v)) = parse_addr(sym, raw) {
+                addresses.insert(k, v);
+            }
+        }
+
+        tracing::warn!("⚠️ Using default token addresses where env overrides were missing/invalid. Prefer from_config() for production.");
+
         Self { addresses }
     }
     

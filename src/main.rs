@@ -42,6 +42,8 @@ async fn main() -> Result<()> {
     // Load configuration
     let config = Config::load()?;
     info!("✅ Configuration loaded");
+    info!("🔍 DEX_ONLY flag from env: {}", std::env::var("DEX_ONLY").unwrap_or_else(|_| "not set".to_string()));
+    info!("🔍 Config.dex_only: {}", config.dex_only);
 
     // Validate configuration
     config.validate()?;

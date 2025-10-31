@@ -89,15 +89,24 @@ impl RouteBuilder {
             },
             TradeRoute {
                 dex_type: leg2,
-                token_in: base,
-                token_out: quote,
+                token_in: base.clone(),
+                token_out: quote.clone(),
                 pool_fee: self.config.default_v3_fee,
                 amount_in: qty,
                 min_amount_out: min_out_sell,
             },
         ];
 
-        info!("Built {} routes for opportunity {}", routes.len(), opp.id);
+        info!(
+            target: "dex.flow",
+            "RouteBuilder: built {} routes for opp={} base={} quote={} qty={} fee={}bps",
+            routes.len(),
+            opp.id,
+            base,
+            quote,
+            qty,
+            self.config.default_v3_fee
+        );
         Ok(routes)
     }
 

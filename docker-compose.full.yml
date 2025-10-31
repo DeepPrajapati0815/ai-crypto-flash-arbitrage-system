@@ -138,6 +138,7 @@ services:
       # App config
       - RUST_LOG=${RUST_LOG:-info}
       - RUST_BACKTRACE=1
+      - DEX_ONLY=${DEX_ONLY:-false}
       
       # Database connections
       - DATABASE_URL=postgresql://${POSTGRES_USER:-hftbot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hftbot}
@@ -161,9 +162,18 @@ services:
       
       # Blockchain
       - EVM_RPC_URL=${EVM_RPC_URL:-https://eth.llamarpc.com}
+      - EVM_RPC_WSS_URL=${EVM_RPC_WSS_URL:-}
       - EVM_CHAIN_ID=${EVM_CHAIN_ID:-1}
       - EVM_PRIVATE_KEY=${EVM_PRIVATE_KEY:-}
       - FLASH_ARB_ADDRESS=${FLASH_ARB_ADDRESS:-}
+
+      # DEX addresses (required for DEX-only mode; provide via .env)
+      - UNISWAP_V3_FACTORY=${UNISWAP_V3_FACTORY:-}
+      - MULTICALL3_ADDRESS=${MULTICALL3_ADDRESS:-}
+      - WETH_ADDRESS=${WETH_ADDRESS:-}
+      - USDC_ADDRESS=${USDC_ADDRESS:-}
+      - DAI_ADDRESS=${DAI_ADDRESS:-}
+      - WBTC_ADDRESS=${WBTC_ADDRESS:-}
       
       # MEV
       - USE_MEV_FIRST=${USE_MEV_FIRST:-false}
