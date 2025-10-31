@@ -36,6 +36,8 @@ futures-util = "0.3"
 reqwest = { version = "0.11", features = ["json", "stream"] }
 url = "2.5"
 
+
+ethers = { version = "2.0" }
 # EVM and blockchain (ethers-rs v2)
 ethers-core = { version = "2.0" }
 ethers-providers = { version = "2.0", default-features = false, features = ["rustls", "ws"] }

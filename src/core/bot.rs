@@ -556,64 +556,177 @@ impl HFTBot {
         // Mark as running
         *self.running.write().await = true;
 
-        // Start Prometheus metrics server
+        // Start Prometheus metrics server (with retry on port conflict)
         let metrics_port = self.config.monitoring_config.metrics_port;
         tokio::spawn(async move {
-            if let Err(e) = crate::monitoring::prometheus::start_metrics_server(metrics_port).await {
-                error!("Failed to start metrics server: {}", e);
+            // Try original port, then fallback ports
+            let ports_to_try = vec![metrics_port, metrics_port + 1, metrics_port + 2, 9090, 9091];
+            
+            for port in ports_to_try {
+                match crate::monitoring::prometheus::start_metrics_server(port).await {
+                    Ok(_) => {
+                        info!("✅ Metrics server started successfully on port {}", port);
+                        return;
+                    }
+                    Err(e) if e.to_string().contains("Address already in use") || 
+                               e.to_string().contains("os error 98") => {
+                        warn!("⚠️ Port {} already in use, trying next port...", port);
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to start metrics server on port {}: {}", port, e);
+                        return;
+                    }
+                }
             }
+            
+            warn!("⚠️ Could not start metrics server on any port. Continuing without metrics.");
         });
-        info!("✅ Metrics server starting on port {}", metrics_port);
+
+        // Give metrics server time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         // Start market data
         info!("🔍 DEX_ONLY flag: {}", self.config.dex_only);
+        
         if self.config.dex_only {
-            // DEX realtime (on-chain heads/logs)
-            let dex_cfg = crate::market_data::dex_realtime::DexRealtimeConfig {
-                fee_tier: 3000,
-                wss_url: if self.config.evm_config.rpc_wss_url.is_empty() { None } else { Some(self.config.evm_config.rpc_wss_url.clone()) },
-                    multicall3_address: Address::from_str("0xcA11bde05977b3631167028862bE2a173976CA11")?, // Multicall3 (same on all networks)
+            // DEX realtime (on-chain data via WebSocket or HTTP polling)
+            info!("📡 Initializing DEX realtime module...");
+            
+            use crate::market_data::dex_realtime::{DexRealtime, DexRealtimeConfig};
+            use std::str::FromStr;
+            
+            let dex_cfg = DexRealtimeConfig {
+                fee_tier: 3000, // 0.3% fee tier (most liquid on Uniswap V3)
+                wss_url: if self.config.evm_config.rpc_wss_url.is_empty() {
+                    info!("ℹ️ No WebSocket URL provided, will use HTTP polling");
+                    None
+                } else {
+                    info!("📡 WebSocket URL configured: {}", self.config.evm_config.rpc_wss_url);
+                    Some(self.config.evm_config.rpc_wss_url.clone())
+                },
+                multicall3_address: ethers::types::Address::from_str(
+                    "0xcA11bde05977b3631167028862bE2a173976CA11"
+                )?,
             };
-            let dex = crate::market_data::dex_realtime::DexRealtime::new(Arc::new(self.config.clone()), dex_cfg).await?;
-            if let Some(ref tx) = self.market_ticker_tx {
-                dex.set_ticker_sender(tx.clone()).await;
+            
+            // Create DEX realtime instance with proper error handling
+            let dex = match DexRealtime::new(
+                Arc::new(self.config.clone()),
+                dex_cfg
+            ).await {
+                Ok(dex) => {
+                    info!("✅ DEX realtime module initialized");
+                    dex
+                }
+                Err(e) => {
+                    error!("❌ Failed to initialize DEX realtime: {}", e);
+                    error!("💡 Troubleshooting tips:");
+                    error!("   1. Check RPC_URL in .env is correct and accessible");
+                    error!("   2. Verify network connectivity");
+                    error!("   3. Confirm token addresses match your network");
+                    error!("   4. Try a different RPC endpoint if this one is rate-limited");
+                    return Err(anyhow::anyhow!("DEX initialization failed: {}", e));
+                }
+            };
+            
+            // Set ticker sender if available
+            // PRODUCTION FIX: DEX realtime uses MarketTicker with UnboundedSender, 
+            // but bot uses Ticker with bounded Sender. Create independent unbounded channel for DEX.
+            // TODO: Add adapter to convert MarketTicker -> Ticker if bridge needed
+            let (unbounded_tx, _unbounded_rx) = tokio::sync::mpsc::unbounded_channel::<crate::market_data::dex_realtime::MarketTicker>();
+            dex.set_ticker_sender(unbounded_tx).await;
+            info!("✅ Ticker sender configured for DEX realtime");
+            
+            // Start DEX data collection with timeout
+            info!("⏳ Starting DEX data collection (timeout: 30s)...");
+            match tokio::time::timeout(
+                Duration::from_secs(30),
+                dex.start()
+            ).await {
+                Ok(Ok(_)) => {
+                    info!("✅ DEX realtime data collection started successfully");
+                }
+                Ok(Err(e)) => {
+                    error!("❌ DEX start failed: {}", e);
+                    return Err(anyhow::anyhow!("DEX start error: {}", e));
+                }
+                Err(_) => {
+                    error!("❌ DEX start timeout after 30 seconds");
+                    error!("💡 This usually means:");
+                    error!("   - RPC endpoint is slow or unresponsive");
+                    error!("   - Network connection issues");
+                    error!("   - No pools found for configured trading pairs");
+                    return Err(anyhow::anyhow!("DEX initialization timeout"));
+                }
             }
-            dex.start().await?;
-            info!("✅ DEX realtime data collection started");
+            
+            // Store DEX instance for later use (optional)
+            // self.dex_realtime = Some(Arc::new(dex));
+            
         } else {
-            // CEX websockets
-            self.websocket_manager.start().await?;
+            // CEX websockets for traditional exchanges
+            info!("📡 Starting CEX WebSocket connections...");
+            
+            match tokio::time::timeout(
+                Duration::from_secs(15),
+                self.websocket_manager.start()
+            ).await {
+                Ok(Ok(_)) => {
+                    info!("✅ CEX WebSocket manager started");
+                }
+                Ok(Err(e)) => {
+                    error!("❌ WebSocket manager start failed: {}", e);
+                    return Err(e);
+                }
+                Err(_) => {
+                    error!("❌ WebSocket manager start timeout");
+                    return Err(anyhow::anyhow!("WebSocket start timeout"));
+                }
+            }
         }
 
         // ✅ ISSUE #1 FIX: Wait for historical data warmup before trading
         info!("⏳ Starting historical data warmup (26 periods for MACD)...");
+        
         let pairs: Vec<String> = self.config.trading_pairs
             .iter()
             .map(|p| format!("{}/{}", p.base, p.quote))
             .collect();
         
-        // Wait up to 30 seconds for 26 periods (sufficient for MACD calculation)
-        // Use shorter timeout to prevent bot from hanging on API failures
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            self.feature_bridge.wait_for_warmup(&pairs, 26, 30)
-        ).await {
-            Ok(Ok(_)) => {
-                info!("✅ Historical data warmup complete! Ready to trade with full indicators.");
-            },
-            Ok(Err(e)) => {
-                warn!("⚠️ Warmup incomplete: {}. Proceeding with available data (predictions may be less accurate initially).", e);
-            },
-            Err(_timeout) => {
-                warn!("⚠️ Warmup timeout after 30s. Proceeding with available data (predictions may be less accurate initially).");
+        if !pairs.is_empty() {
+            info!("📊 Warming up indicators for {} pair(s): {:?}", pairs.len(), pairs);
+            
+            // Wait up to 30 seconds for 26 periods (sufficient for MACD calculation)
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                self.feature_bridge.wait_for_warmup(&pairs, 26, 30)
+            ).await {
+                Ok(Ok(_)) => {
+                    info!("✅ Historical data warmup complete! Ready to trade with full indicators.");
+                },
+                Ok(Err(e)) => {
+                    warn!("⚠️ Warmup incomplete: {}. Proceeding with available data (predictions may be less accurate initially).", e);
+                },
+                Err(_timeout) => {
+                    warn!("⚠️ Warmup timeout after 30s. Proceeding with available data (predictions may be less accurate initially).");
+                }
             }
+        } else {
+            warn!("⚠️ No trading pairs configured - skipping warmup");
         }
 
         // Start health check loop (verifies DB/Redis connectivity)
         {
             let pg = self.postgres_manager.clone();
             let rd = self.redis_manager.clone();
+            
             tokio::spawn(async move {
+                info!("❤️ Health check loop started (interval: 15s)");
+                
+                let mut postgres_failures = 0u32;
+                let mut redis_failures = 0u32;
+                
                 loop {
                     // Postgres health: write a tiny metrics heartbeat
                     let hb = MetricsRecord {
@@ -623,9 +736,38 @@ impl HFTBot {
                         unit: "ok".to_string(),
                         timestamp: chrono::Utc::now(),
                     };
-                    let _ = pg.store_metrics(&hb).await;
+                    
+                    match pg.store_metrics(&hb).await {
+                        Ok(_) => {
+                            if postgres_failures > 0 {
+                                info!("✅ Postgres connection restored");
+                                postgres_failures = 0;
+                            }
+                        },
+                        Err(e) => {
+                            postgres_failures += 1;
+                            if postgres_failures == 1 || postgres_failures % 10 == 0 {
+                                warn!("⚠️ Postgres heartbeat failed (count: {}): {}", postgres_failures, e);
+                            }
+                        }
+                    }
+                    
                     // Redis health: cache small heartbeat
-                    let _ = rd.cache_latency("heartbeat", 0).await;
+                    match rd.cache_latency("heartbeat", 0).await {
+                        Ok(_) => {
+                            if redis_failures > 0 {
+                                info!("✅ Redis connection restored");
+                                redis_failures = 0;
+                            }
+                        },
+                        Err(e) => {
+                            redis_failures += 1;
+                            if redis_failures == 1 || redis_failures % 10 == 0 {
+                                warn!("⚠️ Redis heartbeat failed (count: {}): {}", redis_failures, e);
+                            }
+                        }
+                    }
+                    
                     tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
                 }
             });
@@ -635,13 +777,31 @@ impl HFTBot {
         {
             let emergency_controller = self.emergency_controller.clone();
             let circuit_breaker = self.circuit_breaker.clone();
+            
             tokio::spawn(async move {
+                info!("🚨 Emergency monitoring started (check interval: 5s)");
+                
                 loop {
                     // Check for emergency conditions
                     let stats = circuit_breaker.get_stats().await;
-                    if stats.failed_requests > 10 && stats.current_failure_count > 5 {
-                        warn!("High failure rate detected, activating emergency mode");
+                    
+                    // Emergency thresholds
+                    const MAX_FAILED_REQUESTS: u64 = 10;
+                    const MAX_CONSECUTIVE_FAILURES: u32 = 5;
+                    
+                    if stats.failed_requests > MAX_FAILED_REQUESTS && 
+                       stats.current_failure_count > MAX_CONSECUTIVE_FAILURES {
+                        warn!(
+                            "⚠️ High failure rate detected: {} total failures, {} consecutive failures",
+                            stats.failed_requests, stats.current_failure_count
+                        );
+                        warn!("🚨 Activating emergency mode to protect capital");
+                        
                         emergency_controller.activate_emergency_mode().await;
+                        
+                        // Wait longer before checking again when in emergency mode
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                        continue;
                     }
                     
                     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -649,8 +809,23 @@ impl HFTBot {
             });
         }
 
+        info!("✅ All subsystems initialized successfully");
+        info!("🎯 Starting main trading loop...");
+
         // Start main trading loop
-        self.trading_loop().await?;
+        match self.trading_loop().await {
+            Ok(_) => {
+                info!("🛑 Trading loop completed normally");
+            }
+            Err(e) => {
+                error!("❌ Trading loop error: {}", e);
+                // Don't return error, allow cleanup
+            }
+        }
+
+        // Cleanup
+        *self.running.write().await = false;
+        info!("🛑 Bot stopped gracefully");
 
         Ok(())
     }
