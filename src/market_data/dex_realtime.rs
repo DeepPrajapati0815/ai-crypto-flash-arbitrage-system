@@ -226,10 +226,12 @@ impl DexRealtime {
     async fn initialize_pools(&self) -> Result<()> {
         info!("🔍 Initializing Uniswap V3 pools...");
         
-        // Uniswap V3 Factory on Sepolia
-        let factory_address: Address = "0x0227628f3F023bb0B980b67D528571c95c6DaC1c"
+        // ✅ SEPOLIA FIX: Use factory address from config (reads from .env)
+        let factory_address: Address = self.config.evm_config.uniswap_v3_factory
             .parse()
-            .map_err(|e| anyhow!("Invalid factory address: {}", e))?;
+            .map_err(|e| anyhow!("Invalid factory address '{}': {}", self.config.evm_config.uniswap_v3_factory, e))?;
+        
+        info!("📍 Using Uniswap V3 Factory: {:?} (chain_id: {})", factory_address, self.config.evm_config.chain_id);
         
         // Choose provider (prefer WebSocket if available)
         if let Some(ws) = &*self.ws_provider.read().await {
