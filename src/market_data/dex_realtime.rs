@@ -231,7 +231,7 @@ impl DexRealtime {
             .parse()
             .map_err(|e| anyhow!("Invalid factory address '{}': {}", self.config.evm_config.uniswap_v3_factory, e))?;
         
-        info!("📍 Using Uniswap V3 Factory: {:?} (chain_id: {})", factory_address, self.config.evm_config.chain_id);
+        info!("📍 Using Uniswap V3 Fact+ory: {:?} (chain_id: {})", factory_address, self.config.evm_config.chain_id);
         
         // Choose provider (prefer WebSocket if available)
         if let Some(ws) = &*self.ws_provider.read().await {
@@ -258,23 +258,32 @@ impl DexRealtime {
             let quote_symbol = pair.quote.to_uppercase();
 
             let base_token = match self.token_addresses.get(&base_symbol) {
-                Some(addr) => *addr,
+                Some(addr) => {
+                    info!("✅ Found {} address: {:?}", base_symbol, addr);
+                    *addr
+                },
                 None => {
                     warn!("⚠️ Token {} not found in address map", pair.base);
+                    warn!("📋 Available tokens: {:?}", self.token_addresses.keys().collect::<Vec<_>>());
                     continue;
                 }
             };
 
             let quote_token = match self.token_addresses.get(&quote_symbol) {
-                Some(addr) => *addr,
+                Some(addr) => {
+                    info!("✅ Found {} address: {:?}", quote_symbol, addr);
+                    *addr
+                },
                 None => {
                     warn!("⚠️ Token {} not found in address map", pair.quote);
+                    warn!("📋 Available tokens: {:?}", self.token_addresses.keys().collect::<Vec<_>>());
                     continue;
                 }
             };
 
             for fee_tier in &fee_tiers {
                 info!("🔍 Looking up pool for {}-{} (fee: {})", pair.base, pair.quote, fee_tier);
+                info!("   📍 Token0: {:?}, Token1: {:?}", base_token, quote_token);
 
                 let pool_address = match timeout(
                     Duration::from_secs(10),
