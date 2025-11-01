@@ -45,7 +45,39 @@ library ArbitrageUtils {
     }
 
     /**
-     * @notice Generate route hash for continuity tracking
+     * ✅ PRODUCTION HARDENING: Generate canonical route hash for continuity tracking
+     * Per audit: "hash (dexType, tokenIn, tokenOut, fee, amountIn, minOut, nonce) to avoid collisions"
+     * @param dexType DEX type identifier (0=UniswapV3, 1=Sushiswap)
+     * @param tokenIn Input token
+     * @param tokenOut Output token
+     * @param fee Pool fee tier (for Uniswap V3)
+     * @param amountIn Input amount
+     * @param minAmountOut Minimum output amount
+     * @param nonce Route nonce for uniqueness
+     * @return Route hash
+     */
+    function generateRouteHashCanonical(
+        uint8 dexType,
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 nonce
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            dexType,
+            tokenIn,
+            tokenOut,
+            fee,
+            amountIn,
+            minAmountOut,
+            nonce
+        ));
+    }
+
+    /**
+     * @notice Generate route hash for continuity tracking (legacy)
      * @param tokenIn Input token
      * @param tokenOut Output token
      * @param amountIn Input amount

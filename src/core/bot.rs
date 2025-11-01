@@ -8,6 +8,7 @@ use crate::performance::optimization::{PerformanceOptimizer, OptimizationConfig}
 use crate::core::arbitrage::ArbitrageEngine;
 use crate::market_data::websocket::WebSocketManager;
 use crate::market_data::orderbook::OrderBookManager;
+use crate::market_data::dex_realtime::{DexRealtime, DexRealtimeConfig};
 use tokio::sync::mpsc;
 use rust_decimal::prelude::ToPrimitive;
 use std::time::Duration;
@@ -347,54 +348,42 @@ impl HFTBot {
             let metrics_clone = metrics_collector.clone(); // ✅ Clone metrics for fallback tracking
             tokio::spawn(async move {
                 while let Some(sample) = features_rx.recv().await {
-                    // PRODUCTION FIX: Use ONNX predictor exclusively for safety
-                    // If ONNX is unavailable, skip prediction rather than using untested heuristics
-                // ✅ AUDIT ISSUE #4 FIX: ONNX predictor with heuristic fallback
+                    // ✅ PRODUCTION HARDENING: ONNX-only prediction, no heuristic fallbacks
+                    // Per audit requirement: "Remove/guard heuristics in prediction loop; 
+                    // if ONNX unavailable or inference fails, drop trade and trigger circuit breaker"
                     let pred = if let Some(onnx) = &onnx_pred {
                         // Use production ONNX inference with features
                         match onnx.predict_from_features(&sample.features).await {
                             Ok(prediction) => prediction,
                             Err(e) => {
-                            tracing::error!(
-                                "❌ ONNX prediction failed: {}. Using heuristic fallback (conservative mode).", 
-                                e
-                            );
-                            
-                            // ✅ PRODUCTION FIX: Heuristic fallback instead of skipping
-                            // Features: [0]=buy_price, [1]=sell_price, [2]=spread%, [45]=confidence
-                            let spread_pct = if sample.features.len() > 2 { sample.features[2] } else { 0.0 };
-                            let confidence = if sample.features.len() > 45 { sample.features[45] } else { 0.0 };
-                            
-                            // Track fallback usage
-                            let _ = metrics_clone.record_inference_fallback().await;
-                            
-                            // Conservative heuristic: only high-spread, high-confidence opportunities
-                            if spread_pct > 1.5 && confidence > 0.9 {
-                                0.65 // Conservative prediction (65% confidence)
-                            } else {
-                                0.0 // Skip marginal opportunities
-                            }
+                                tracing::error!(
+                                    target: "ml.prediction",
+                                    "❌ ONNX prediction failed for {}: {}. Dropping trade (no heuristic fallback).", 
+                                    sample.pair.symbol(),
+                                    e
+                                );
+                                
+                                // Track prediction failure for circuit breaker
+                                let _ = metrics_clone.record_prediction_failure().await;
+                                
+                                // ✅ AUDIT FIX: Skip trade entirely on ONNX failure
+                                // Impact: Prevents untested heuristic logic from executing real trades
+                                continue; // Drop this sample, don't send prediction
                             }
                         }
                     } else {
-                    // ✅ PRODUCTION FIX: Heuristic fallback when ONNX is unavailable
-                    tracing::warn!(
-                        "⚠️ No ONNX predictor available for {}. Using heuristic fallback (conservative mode).",
-                        sample.pair.symbol()
-                    );
-                    
-                    // Use simple heuristic: only trade if spread > 1% and confidence > 85%
-                    let spread_pct = if sample.features.len() > 2 { sample.features[2] } else { 0.0 };
-                    let confidence = if sample.features.len() > 45 { sample.features[45] } else { 0.0 };
-                    
-                    // Track fallback usage
-                    let _ = metrics_clone.record_inference_fallback().await;
-                    
-                    if spread_pct > 1.0 && confidence > 0.85 {
-                        0.70 // Conservative prediction (70% confidence)
-                        } else {
-                        0.0 // Skip low-quality opportunities
-                        }
+                        // ✅ AUDIT FIX: No ONNX predictor = no trading
+                        tracing::error!(
+                            target: "ml.prediction",
+                            "❌ No ONNX predictor available for {}. Dropping trade (ONNX-only mode).",
+                            sample.pair.symbol()
+                        );
+                        
+                        // Track missing predictor for circuit breaker
+                        let _ = metrics_clone.record_prediction_failure().await;
+                        
+                        // Skip this sample entirely
+                        continue;
                     };
                     
                     // Send prediction with proper error handling
@@ -591,19 +580,12 @@ impl HFTBot {
         
         if self.config.dex_only {
             // DEX realtime (on-chain data via WebSocket or HTTP polling)
-            info!("📡 Initializing DEX realtime module...");
-            
-            use crate::market_data::dex_realtime::{DexRealtime, DexRealtimeConfig};
-            use std::str::FromStr;
-            
             let dex_cfg = DexRealtimeConfig {
-                fee_tier: 3000, // 0.3% fee tier (most liquid on Uniswap V3)
-                wss_url: if self.config.evm_config.rpc_wss_url.is_empty() {
-                    info!("ℹ️ No WebSocket URL provided, will use HTTP polling");
-                    None
-                } else {
-                    info!("📡 WebSocket URL configured: {}", self.config.evm_config.rpc_wss_url);
+                fee_tiers: vec![500, 3000, 10000], // 0.05%, 0.3%, 1% fee tiers
+                wss_url: if !self.config.evm_config.rpc_wss_url.is_empty() {
                     Some(self.config.evm_config.rpc_wss_url.clone())
+                } else {
+                    None
                 },
                 multicall3_address: ethers::types::Address::from_str(
                     "0xcA11bde05977b3631167028862bE2a173976CA11"

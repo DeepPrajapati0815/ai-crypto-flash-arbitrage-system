@@ -31,3 +31,5 @@ pub mod enhanced_nonce_manager; // ✅ ISSUE #5-6 FIX: Nonce manager with reorg 
 pub mod redundant_gas_oracle; // ✅ ISSUE #7 FIX: Redundant gas oracle with median aggregation
 pub mod realtime_pnl_tracker; // ✅ ISSUE #13 FIX: Real-time P&L tracking with transaction lifecycle monitoring
 pub mod mev_execution_racer; // ✅ ISSUE #11 FIX: Parallel MEV + regular execution racing
+/// ✅ PRODUCTION HARDENING: Token decimals manager with on-chain ERC20 queries
+pub mod token_decimals;

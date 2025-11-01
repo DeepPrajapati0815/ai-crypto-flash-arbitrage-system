@@ -114,6 +114,24 @@ impl MetricsCollector {
         *count // Return current count for circuit breaker threshold check
     }
     
+    /// ✅ PRODUCTION HARDENING: Record prediction failure for circuit breaker
+    pub async fn record_prediction_failure(&self) -> u64 {
+        // Reuse inference fallback counter for prediction failures
+        let mut count = self.inference_fallback_count.write().await;
+        *count += 1;
+        let current_count = *count;
+        
+        if current_count % 10 == 0 {
+            tracing::warn!(
+                target: "ml.prediction",
+                "Prediction failures: {} total",
+                current_count
+            );
+        }
+        
+        current_count
+    }
+    
     /// ✅ AUDIT ISSUE #4 FIX: Record inference fallback usage (REAL IMPLEMENTATION)
     pub async fn record_inference_fallback(&self) -> u64 {
         let mut count = self.inference_fallback_count.write().await;

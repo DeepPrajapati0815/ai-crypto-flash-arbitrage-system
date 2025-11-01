@@ -187,17 +187,29 @@ impl MEVSubmissionManager {
     ) -> Result<MEVSubmissionResult> {
         let start_time = Utc::now();
         
-        // Simulate transaction if enabled
+        // ✅ PRODUCTION HARDENING: Simulation gating - abort on simulation failure
+        // Per audit: "if simulator fails, abort submission instead of continuing"
+        // Impact: Prevents submitting transactions that will revert, saving gas and MEV relay reputation
         if self.config.simulation_enabled {
             match self.simulate_transaction(tx_request).await {
                 Ok(simulation_result) => {
                     if !simulation_result.success {
+                        error!(
+                            target: "mev.submission",
+                            "Simulation failed for {:?}: {}. Aborting submission.",
+                            strategy,
+                            simulation_result.error_message.as_deref().unwrap_or("Unknown error")
+                        );
+                        
                         return Ok(MEVSubmissionResult {
                             strategy: strategy.clone(),
                             transaction_hash: None,
                             bundle_hash: None,
                             success: false,
-                            error_message: Some(format!("Simulation failed: {}", simulation_result.error_message.unwrap_or("Unknown error".to_string()))),
+                            error_message: Some(format!(
+                                "Simulation failed: {}",
+                                simulation_result.error_message.unwrap_or("Unknown error".to_string())
+                            )),
                             gas_used: Some(U256::from(simulation_result.gas_used)),
                             gas_price: None,
                             submission_time: start_time,
@@ -205,9 +217,34 @@ impl MEVSubmissionManager {
                             block_number: None,
                         });
                     }
+                    
+                    info!(
+                        target: "mev.submission",
+                        "Simulation passed: gas_used={}, strategy={:?}",
+                        simulation_result.gas_used,
+                        strategy
+                    );
                 }
                 Err(e) => {
-                    warn!("Transaction simulation failed: {}, proceeding anyway", e);
+                    // ✅ AUDIT FIX: Abort on simulation error instead of proceeding
+                    error!(
+                        target: "mev.submission",
+                        "Transaction simulation error: {}. Aborting submission.",
+                        e
+                    );
+                    
+                    return Ok(MEVSubmissionResult {
+                        strategy: strategy.clone(),
+                        transaction_hash: None,
+                        bundle_hash: None,
+                        success: false,
+                        error_message: Some(format!("Simulation error: {}", e)),
+                        gas_used: None,
+                        gas_price: None,
+                        submission_time: start_time,
+                        inclusion_time: None,
+                        block_number: None,
+                    });
                 }
             }
         }

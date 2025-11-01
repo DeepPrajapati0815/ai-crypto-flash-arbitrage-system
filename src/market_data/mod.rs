@@ -9,3 +9,5 @@ pub mod lockfree_orderbook;
 pub mod versioned_orderbook;
 /// Realtime DEX market data (newHeads + slot0)
 pub mod dex_realtime;
+/// ✅ PRODUCTION FIX: DEX ticker adapter for converting MarketTicker to core Ticker
+pub mod dex_ticker_adapter;
