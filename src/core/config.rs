@@ -150,11 +150,17 @@ impl Config {
         }
 
         // Trading pairs
+        // ✅ SEPOLIA FIX: Use tokens that have addresses configured (WETH, USDC, DAI, USDT)
+        // Note: BTC and ETH are not in token_addresses map, use WETH and WBTC instead
         let trading_pairs = vec![
-            TradingPair::new("BTC", "USDT"),
-            TradingPair::new("ETH", "USDT"),
-            TradingPair::new("ETH", "BTC"),
-            TradingPair::new("USDC", "USDT"),
+            // TradingPair::new("BTC", "USDT"),
+            // TradingPair::new("ETH", "USDT"),
+            // TradingPair::new("ETH", "BTC"),
+            // TradingPair::new("USDC", "USDT"),
+
+            TradingPair::new("WETH", "USDC"),  // Most liquid pair on testnet
+            TradingPair::new("WETH", "DAI"),   // Alternative WETH pair
+            TradingPair::new("USDC", "DAI"),   // Stablecoin pair
         ];
 
         // Risk limits
