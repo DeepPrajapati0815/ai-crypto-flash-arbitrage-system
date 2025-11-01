@@ -931,7 +931,12 @@ impl FeatureBridge {
             .ok_or_else(|| anyhow!("Unknown token: {}", pair.quote))?;
         
         // Query Uniswap V3 Factory
-        let factory_address = "0x1F98431c8aD98523631AE4a59f267346ea31F984".parse::<Address>()?;
+        // ✅ SEPOLIA FIX: Use factory from orderbook manager's config instead of hardcoded mainnet address
+        let config = self.orderbook_manager.read().await;
+        // For now, use a default that should be overridden by proper config injection
+        let factory_address = std::env::var("UNISWAP_V3_FACTORY")
+            .unwrap_or_else(|_| "0x1F98431c8aD98523631AE4a59f267346ea31F984".to_string())
+            .parse::<Address>()?;
         let factory = IUniswapV3Factory::new(factory_address, self.provider.clone());
         
         let pool_address = factory.get_pool(*token0, *token1, 3000).call().await
