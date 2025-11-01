@@ -231,7 +231,18 @@ impl DexRealtime {
             .parse()
             .map_err(|e| anyhow!("Invalid factory address '{}': {}", self.config.evm_config.uniswap_v3_factory, e))?;
         
-        info!("📍 Using Uniswap V3 Fact+ory: {:?} (chain_id: {})", factory_address, self.config.evm_config.chain_id);
+        info!("📍 Using Uniswap V3 Factory: {:?} (chain_id: {})", factory_address, self.config.evm_config.chain_id);
+        
+        // Verify factory contract exists
+        let code = self.http_provider.get_code(factory_address, None).await
+            .context("Failed to check factory contract code")?;
+        if code.is_empty() {
+            return Err(anyhow!(
+                "❌ No contract found at factory address {:?}. This address may be incorrect for chain_id {}.",
+                factory_address, self.config.evm_config.chain_id
+            ));
+        }
+        info!("✅ Factory contract verified (code size: {} bytes)", code.len());
         
         // Choose provider (prefer WebSocket if available)
         if let Some(ws) = &*self.ws_provider.read().await {
