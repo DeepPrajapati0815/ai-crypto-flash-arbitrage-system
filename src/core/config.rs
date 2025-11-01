@@ -96,6 +96,30 @@ fn default_token_addresses() -> HashMap<String, String> {
     addresses
 }
 
+/// ✅ SEPOLIA FIX: Token addresses for Sepolia testnet (VERIFIED)
+fn sepolia_token_addresses() -> HashMap<String, String> {
+    let mut addresses = HashMap::new();
+    
+    // Sepolia Testnet addresses (chain_id: 11155111)
+    // ✅ VERIFIED from Uniswap official docs and GeckoTerminal
+    addresses.insert("WETH".to_string(), "0xfff9976782d46cc05630d1f6ebab18b2324d6b14".to_string());
+    addresses.insert("USDC".to_string(), "0x94a9d9ac8a22534e3faca9f4e7f2e2cf85d5e4c8".to_string());
+    
+    addresses
+}
+
+/// Get token addresses based on chain ID
+fn get_token_addresses_for_chain(chain_id: u64) -> HashMap<String, String> {
+    match chain_id {
+        1 => default_token_addresses(),      // Ethereum Mainnet
+        11155111 => sepolia_token_addresses(), // Sepolia Testnet
+        _ => {
+            tracing::warn!("Unknown chain_id {}, using mainnet addresses", chain_id);
+            default_token_addresses()
+        }
+    }
+}
+
 /// MEV/Flashbots configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MevConfig {
@@ -221,10 +245,12 @@ impl Config {
         };
 
         // EVM configuration
+        let chain_id = env::var("EVM_CHAIN_ID").unwrap_or_else(|_| "1".to_string()).parse().unwrap_or(1);
+        
         let evm_config = EvmConfig {
             rpc_url: env::var("EVM_RPC_URL").unwrap_or_else(|_| "https://eth.llamarpc.com".to_string()),
             rpc_wss_url: env::var("EVM_RPC_WSS_URL").unwrap_or_else(|_| "".to_string()),
-            chain_id: env::var("EVM_CHAIN_ID").unwrap_or_else(|_| "1".to_string()).parse().unwrap_or(1),
+            chain_id,
             wallet_private_key: env::var("EVM_PRIVATE_KEY").unwrap_or_else(|_| "".to_string()),
             flash_arb_contract: env::var("FLASH_ARB_ADDRESS").unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string()),
             aave_pool: env::var("AAVE_POOL_ADDRESS").unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string()),
@@ -235,8 +261,8 @@ impl Config {
             weth: env::var("WETH_ADDRESS").unwrap_or_else(|_| "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
             usdc: env::var("USDC_ADDRESS").unwrap_or_else(|_| "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()),
             usdt: env::var("USDT_ADDRESS").unwrap_or_else(|_| "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string()),
-            // ✅ ISSUE #11 FIX: Use default token addresses function
-            token_addresses: default_token_addresses(),
+            // ✅ SEPOLIA FIX: Use chain-aware token addresses (auto-detects Sepolia vs Mainnet)
+            token_addresses: get_token_addresses_for_chain(chain_id),
         };
 
         // MEV configuration
