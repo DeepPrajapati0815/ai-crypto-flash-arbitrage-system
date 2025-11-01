@@ -165,16 +165,17 @@ contract FlashArb is ReentrancyGuard, Ownable {
             });
         }
 
-        // ✅ PRODUCTION HARDENING: Increment nonce BEFORE flashLoan to prevent reentrancy issues
-        // Per audit: "increment routeNonce before flashLoan, reset on failure"
-        routeNonce++;
-        uint256 currentNonce = routeNonce;
+        // ✅ AUDIT FIX: Increment nonce AFTER successful execution to prevent replay attacks
+        // Issue: Incrementing before flashLoan creates nonce gaps on revert, enabling replay
+        // Impact: Prevents attackers from replaying profitable arbitrage routes
+        uint256 currentNonce = routeNonce + 1;
         
         // Validate route continuity and deadlines
         _validateRoutes(routes);
 
         bytes memory params = abi.encode(routes, currentNonce);
 
+        // Execute flash loan - nonce only incremented on success (in executeOperation)
         aavePool.flashLoanSimple(
             address(this),
             asset,
@@ -214,9 +215,15 @@ contract FlashArb is ReentrancyGuard, Ownable {
         // Decode routes and nonce
         (TradeRoute[] memory routes, uint256 nonce) = abi.decode(params, (TradeRoute[], uint256));
         
-        // Validate nonce to prevent replay attacks
-        require(nonce == routeNonce, "Invalid nonce");
+        // ✅ AUDIT FIX: Validate and increment nonce atomically to prevent replay
+        // Nonce must be exactly routeNonce + 1 (no gaps allowed)
+        require(nonce == routeNonce + 1, "Invalid nonce");
+        
         _executeArbitrageRoutesSecure(routes, asset);
+        
+        // ✅ AUDIT FIX: Only increment nonce after successful execution
+        // This prevents nonce gaps that could enable replay attacks
+        routeNonce = nonce;
 
         uint256 balanceAfter = IERC20(asset).balanceOf(address(this));
         uint256 totalDebt = amount + premium;

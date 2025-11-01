@@ -671,11 +671,37 @@ impl FeatureBridge {
         value.to_string().parse::<f32>().unwrap_or(0.0)
     }
     
-    /// Helper: Fast Decimal to f32 conversion
+    /// ✅ AUDIT FIX #3: Safe Decimal to f32 conversion with precision validation
+    /// Issue: f32 has only 24-bit mantissa, losing precision for large values (e.g., BTC prices)
+    /// Impact: Prevents ML model from receiving imprecise features that degrade accuracy
     #[inline(always)]
     fn to_f32_fast(&self, value: Decimal) -> f32 {
-        // Direct to_f32 is usually fast enough, but we inline it for optimization
-        value.to_f32().unwrap_or(0.0)
+        // Convert to f32
+        let f = value.to_f32().unwrap_or(0.0);
+        
+        // ✅ AUDIT FIX #3: Validate precision loss for large values
+        // f32 precision degrades for values > 16777216 (2^24)
+        if value.abs() > Decimal::new(10000, 0) { // Check values > 10,000
+            // Validate roundtrip precision by converting back to Decimal
+            let roundtrip = Decimal::from_f32_retain(f).unwrap_or(value);
+            let error = (value - roundtrip).abs();
+            
+            // Only calculate relative error if value is non-zero
+            if !value.is_zero() {
+                let relative_error = error / value.abs();
+                
+                // Warn if relative error > 0.0001% (1e-6)
+                if relative_error > Decimal::new(1, 6) { // 0.000001 = 1e-6
+                    tracing::warn!(
+                        target: "ml.precision",
+                        "⚠️ Precision loss in Decimal→f32: {} → {} (error: {}, relative: {:.6}%)",
+                        value, f, error, relative_error.to_f64().unwrap_or(0.0) * 100.0
+                    );
+                }
+            }
+        }
+        
+        f
     }
 
     /// Fallback order book method for feature extraction

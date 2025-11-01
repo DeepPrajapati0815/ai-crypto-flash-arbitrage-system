@@ -5,6 +5,7 @@
 use prometheus::{
     Gauge, Histogram, HistogramOpts, IntCounter, IntGauge, Opts, Registry,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{error, info, warn};
 
 /// Production metrics collector with Prometheus integration
@@ -59,6 +60,9 @@ pub struct ProductionMetrics {
     // Data Gap Metrics
     data_gap_seconds: Gauge,
     data_gap_alerts: IntCounter,
+    
+    // ✅ AUDIT FIX #2: Track consecutive ONNX failures for circuit breaker
+    consecutive_onnx_failures: AtomicU64,
 }
 
 impl ProductionMetrics {
@@ -296,6 +300,7 @@ impl ProductionMetrics {
             estimated_gas_cost_usd,
             data_gap_seconds,
             data_gap_alerts,
+            consecutive_onnx_failures: AtomicU64::new(0),
         })
     }
     
@@ -324,9 +329,26 @@ impl ProductionMetrics {
         self.onnx_inference_latency.observe(latency_ms);
     }
     
-    pub async fn record_onnx_error(&self) {
+    /// ✅ AUDIT FIX #2: Record ONNX error and return consecutive failure count
+    /// Impact: Enables circuit breaker activation on sustained ONNX failures
+    pub async fn record_onnx_error(&self) -> u64 {
         self.onnx_inference_errors.inc();
-        error!(target: "monitoring", "ONNX inference error recorded");
+        let count = self.consecutive_onnx_failures.fetch_add(1, Ordering::SeqCst) + 1;
+        error!(target: "monitoring", "ONNX inference error recorded (consecutive: {})", count);
+        count
+    }
+    
+    /// ✅ AUDIT FIX #2: Reset consecutive failure counter on successful inference
+    pub async fn reset_onnx_failure_count(&self) {
+        let prev = self.consecutive_onnx_failures.swap(0, Ordering::SeqCst);
+        if prev > 0 {
+            info!(target: "monitoring", "ONNX failures reset (was: {})", prev);
+        }
+    }
+    
+    /// ✅ AUDIT FIX #2: Get current consecutive failure count
+    pub async fn get_onnx_failure_count(&self) -> u64 {
+        self.consecutive_onnx_failures.load(Ordering::SeqCst)
     }
     
     pub async fn record_prediction_failure(&self) {

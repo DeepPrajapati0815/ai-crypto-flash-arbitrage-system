@@ -19,6 +19,7 @@ use crate::execution::engine::ExecutionEngine;
 use crate::execution::exchange::ExchangeManager;
 use crate::risk::manager::RiskManager;
 use crate::monitoring::metrics::MetricsCollector;
+use crate::monitoring::production_metrics::ProductionMetrics;
 use crate::mev::flashbots::FlashbotsClient;
 use crate::mev::mev_share::MEVShareClient;
 use crate::database::models::{TradeRecord, MetricsRecord};
@@ -47,6 +48,7 @@ pub struct HFTBot {
     exchange_manager: Arc<ExchangeManager>,
     risk_manager: Arc<RiskManager>,
     metrics_collector: Arc<MetricsCollector>,
+    production_metrics: Arc<ProductionMetrics>,
     postgres_manager: Arc<PostgresManager>,
     redis_manager: Arc<RedisManager>,
     performance_optimizer: Arc<RwLock<PerformanceOptimizer>>,
@@ -85,6 +87,9 @@ impl HFTBot {
         let exchange_manager = Arc::new(ExchangeManager::new(&config).await?);
         let risk_manager = Arc::new(RiskManager::new(config.risk_limits.clone()));
         let metrics_collector = Arc::new(MetricsCollector::new());
+        let production_metrics = Arc::new(ProductionMetrics::new().unwrap_or_else(|e| {
+            panic!("Failed to initialize production metrics: {}", e)
+        }));
 
         // ML components
         let feature_engine = Arc::new(RwLock::new(FeatureEngine::new()));
@@ -340,12 +345,17 @@ impl HFTBot {
             });
         }
 
+        // ✅ AUDIT FIX #2: Initialize circuit breaker early for prediction task
+        let circuit_breaker = Arc::new(CircuitBreaker::new());
+        
         // Spawn feature -> model prediction task
         {
             let models_arc = models.clone();
             let onnx_pred = onnx_predictor.clone();
             let predictions_tx_clone = predictions_tx.clone();
-            let metrics_clone = metrics_collector.clone(); // ✅ Clone metrics for fallback tracking
+            let metrics_clone = metrics_collector.clone();
+            let prod_metrics_clone = production_metrics.clone(); // ✅ AUDIT FIX #2: Production metrics for ONNX tracking
+            let circuit_breaker_clone = circuit_breaker.clone(); // ✅ AUDIT FIX #2: Circuit breaker for ONNX failures
             tokio::spawn(async move {
                 while let Some(sample) = features_rx.recv().await {
                     // ✅ PRODUCTION HARDENING: ONNX-only prediction, no heuristic fallbacks
@@ -353,8 +363,27 @@ impl HFTBot {
                     // if ONNX unavailable or inference fails, drop trade and trigger circuit breaker"
                     let pred = if let Some(onnx) = &onnx_pred {
                         // Use production ONNX inference with features
+                        // ✅ AUDIT FIX #5: Validate prediction timestamp (detect stale signals)
+                        // Impact: Prevents execution on outdated market conditions (>200ms old)
+                        let prediction_age = chrono::Utc::now() - sample.timestamp;
+                        const MAX_PREDICTION_AGE_MS: i64 = 200;
+                        
+                        if prediction_age.num_milliseconds() > MAX_PREDICTION_AGE_MS {
+                            tracing::warn!(
+                                target: "ml.prediction",
+                                "⚠️ Stale prediction detected: {}ms old for {}. Skipping.",
+                                prediction_age.num_milliseconds(),
+                                sample.pair.symbol()
+                            );
+                            continue; // Skip stale predictions
+                        }
+                        
                         match onnx.predict_from_features(&sample.features).await {
-                            Ok(prediction) => prediction,
+                            Ok(prediction) => {
+                                // ✅ AUDIT FIX #2: Reset failure counter on success
+                                let _ = prod_metrics_clone.reset_onnx_failure_count().await;
+                                prediction
+                            },
                             Err(e) => {
                                 tracing::error!(
                                     target: "ml.prediction",
@@ -363,12 +392,25 @@ impl HFTBot {
                                     e
                                 );
                                 
-                                // Track prediction failure for circuit breaker
-                                let _ = metrics_clone.record_prediction_failure().await;
+                                // ✅ AUDIT FIX #2: Track consecutive ONNX failures for circuit breaker
+                                // Impact: Prevents silent trading halt by alerting on sustained failures
+                                let failure_count = prod_metrics_clone.record_onnx_error().await;
                                 
-                                // ✅ AUDIT FIX: Skip trade entirely on ONNX failure
-                                // Impact: Prevents untested heuristic logic from executing real trades
-                                continue; // Drop this sample, don't send prediction
+                                // ✅ AUDIT FIX #2: Activate circuit breaker on sustained failures
+                                const ONNX_FAILURE_THRESHOLD: u64 = 100;
+                                if failure_count >= ONNX_FAILURE_THRESHOLD {
+                                    tracing::error!(
+                                        target: "circuit_breaker",
+                                        "🚨 CRITICAL: {} consecutive ONNX failures. Activating circuit breaker.",
+                                        failure_count
+                                    );
+                                    
+                                    circuit_breaker_clone.open().await;
+                                    tracing::error!("Circuit breaker OPENED due to sustained ONNX failures");
+                                }
+                                
+                                // Skip trade entirely on ONNX failure
+                                continue;
                             }
                         }
                     } else {
@@ -502,8 +544,7 @@ impl HFTBot {
             });
         }
 
-        // Initialize circuit breaker and emergency controller
-        let circuit_breaker = Arc::new(CircuitBreaker::new());
+        // Initialize emergency controller (circuit breaker already initialized above)
         let emergency_controller = Arc::new(EmergencyController::new());
 
         Ok(Self {
@@ -515,6 +556,7 @@ impl HFTBot {
             exchange_manager,
             risk_manager,
             metrics_collector,
+            production_metrics,
             postgres_manager,
             redis_manager,
             performance_optimizer,
