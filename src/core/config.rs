@@ -159,8 +159,8 @@ impl Config {
             // TradingPair::new("USDC", "USDT"),
 
             TradingPair::new("WETH", "USDC"),  // Most liquid pair on testnet
-            TradingPair::new("WETH", "DAI"),   // Alternative WETH pair
-            TradingPair::new("USDC", "DAI"),   // Stablecoin pair
+            // TradingPair::new("WETH", "DAI"),   // Alternative WETH pair
+            // TradingPair::new("USDC", "DAI"),   // Stablecoin pair
         ];
 
         // Risk limits
