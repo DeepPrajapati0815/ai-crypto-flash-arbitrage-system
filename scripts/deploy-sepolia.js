@@ -36,83 +36,26 @@ async function main() {
   console.log("");
 
   try {
-    // Deploy FlashArb (base contract)
-    console.log("📦 Deploying FlashArb...");
-    // const FlashArb = await ethers.getContractFactory("FlashArb");
-    // const flashArb = await FlashArb.deploy(
-    //   SEPOLIA_ADDRESSES.aavePool,
-    //   SEPOLIA_ADDRESSES.uniswapV3Router,
-    //   SEPOLIA_ADDRESSES.sushiswapRouter
-    // );
-    // await flashArb.waitForDeployment();
-    // const flashArbAddress = await flashArb.getAddress();
-    // console.log("✅ FlashArb deployed to:", flashArbAddress);
-
-    // Deploy FlashArbSecure
-    console.log("📦 Deploying FlashArbSecure...");
-    const FlashArbSecure = await ethers.getContractFactory("FlashArbSecure");
-    // const flashArbSecure = await FlashArbSecure.deploy(
-    //   SEPOLIA_ADDRESSES.aavePool,
-    //   SEPOLIA_ADDRESSES.uniswapV3Router,
-    //   SEPOLIA_ADDRESSES.sushiswapRouter
-    // );
-    // await flashArbSecure.waitForDeployment();
-    // const flashArbSecureAddress = await flashArbSecure.getAddress();
-    // console.log("✅ FlashArbSecure deployed to:", flashArbSecureAddress);
-
-    // Deploy FlashArbWithTimelock
-    // console.log("📦 Deploying FlashArbWithTimelock...");
-    // const FlashArbWithTimelock = await ethers.getContractFactory("FlashArbWithTimelock");
-    // const flashArbWithTimelock = await FlashArbWithTimelock.deploy(
-    //   SEPOLIA_ADDRESSES.aavePool,
-    //   SEPOLIA_ADDRESSES.uniswapV3Router,
-    //   SEPOLIA_ADDRESSES.sushiswapRouter
-    // );
-    // await flashArbWithTimelock.waitForDeployment();
-    // const flashArbWithTimelockAddress = await flashArbWithTimelock.getAddress();
-    // console.log("✅ FlashArbWithTimelock deployed to:", flashArbWithTimelockAddress);
-
-    // Deploy FlashArbOptimized
-    // console.log("📦 Deploying FlashArbOptimized...");
-    // const FlashArbOptimized = await ethers.getContractFactory("FlashArbOptimized");
-    // const flashArbOptimized = await FlashArbOptimized.deploy(
-    //   SEPOLIA_ADDRESSES.aavePool,
-    //   SEPOLIA_ADDRESSES.uniswapV3Router,
-    //   SEPOLIA_ADDRESSES.sushiswapRouter,
-    //   ethers.ZeroAddress // permit2 not needed for testnet
-    // );
-    // await flashArbOptimized.waitForDeployment();
-    // const flashArbOptimizedAddress = await flashArbOptimized.getAddress();
-    // console.log("✅ FlashArbOptimized deployed to:", flashArbOptimizedAddress);
-
-    // Deploy FlashArbProductionSafe
-    console.log("📦 Deploying FlashArbProductionSafe...");
-    const FlashArbProductionSafe = await ethers.getContractFactory("FlashArbProductionSafe");
-    const flashArbProductionSafe = await FlashArbProductionSafe.deploy(
+    // Deploy FlashArbUltimate (inherits from FlashArb, so base is included)
+    console.log("📦 Deploying FlashArbUltimate...");
+    const FlashArbUltimate = await ethers.getContractFactory("FlashArbUltimate");
+    const flashArbUltimate = await FlashArbUltimate.deploy(
       SEPOLIA_ADDRESSES.aavePool,
       SEPOLIA_ADDRESSES.uniswapV3Router,
-    SEPOLIA_ADDRESSES.sushiswapRouter,
-    ethers.ZeroAddress,
-    ethers.parseEther("0.001") // MIN_PROFIT_WEI = 0.001 ETH
+      SEPOLIA_ADDRESSES.sushiswapRouter,
+      ethers.parseEther("0.001"), // _minProfitWei = 0.001 ETH
+      5 // _maxFailedAttempts = 5
     );
-    await flashArbProductionSafe.waitForDeployment();
-    const flashArbProductionSafeAddress = await flashArbProductionSafe.getAddress();
-    console.log("✅ FlashArbProductionSafe deployed to:", flashArbProductionSafeAddress);
+    await flashArbUltimate.waitForDeployment();
+    const flashArbUltimateAddress = await flashArbUltimate.getAddress();
+    console.log("✅ FlashArbUltimate deployed to:", flashArbUltimateAddress);
 
     console.log("\n🎉 All contracts deployed successfully!");
     console.log("\n📋 Deployment Summary:");
     console.log("========================");
-  // console.log("FlashArb:", flashArbAddress);
-  // console.log("FlashArbSecure:", flashArbSecureAddress);
-  // console.log("FlashArbWithTimelock:", flashArbWithTimelockAddress);
-  // console.log("FlashArbOptimized:", flashArbOptimizedAddress);
-    console.log("FlashArbProductionSafe:", flashArbProductionSafeAddress);
+    console.log("FlashArbUltimate:", flashArbUltimateAddress);
     console.log("\n🔗 View on Etherscan:");
-  // console.log(`https://sepolia.etherscan.io/address/${flashArbAddress}`);
-  // console.log(`https://sepolia.etherscan.io/address/${flashArbSecureAddress}`);
-  // console.log(`https://sepolia.etherscan.io/address/${flashArbWithTimelockAddress}`);
-  // console.log(`https://sepolia.etherscan.io/address/${flashArbOptimizedAddress}`);
-    console.log(`https://sepolia.etherscan.io/address/${flashArbProductionSafeAddress}`);
+    console.log(`https://sepolia.etherscan.io/address/${flashArbUltimateAddress}`);
 
     // Save deployment info
     const deploymentInfo = {
@@ -120,11 +63,7 @@ async function main() {
       timestamp: new Date().toISOString(),
       deployer: deployer.address,
       contracts: {
-      // FlashArb: flashArbAddress,
-      // FlashArbSecure: flashArbSecureAddress,
-      // FlashArbWithTimelock: flashArbWithTimelockAddress,
-      // FlashArbOptimized: flashArbOptimizedAddress,
-        FlashArbProductionSafe: flashArbProductionSafeAddress,
+        FlashArbUltimate: flashArbUltimateAddress,
       },
       addresses: SEPOLIA_ADDRESSES,
     };

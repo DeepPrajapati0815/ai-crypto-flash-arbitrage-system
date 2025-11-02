@@ -1,9 +1,9 @@
 {
   "network": "sepolia",
-  "timestamp": "2025-10-30T14:26:50.804Z",
+  "timestamp": "2025-11-02T12:30:35.512Z",
   "deployer": "0x06C107E047ab8641510E689bE3F25afBD13F5D5e",
   "contracts": {
-    "FlashArbProductionSafe": "0xF4a6581a9D79AD5F713afD6647E174cC14961123"
+    "FlashArbUltimate": "0x8eAd41EA7e84d4FCb334d23C4279EDf098453456"
   },
   "addresses": {
     "aavePool": "0x012bAC54348C0E635dCAc9D5FB99f06F24136C9A",
