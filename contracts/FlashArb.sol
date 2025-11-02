@@ -120,10 +120,10 @@ contract FlashArb is ReentrancyGuard, Ownable {
      * @dev Compatible with Rust bindings - uses structs for type safety
      */
     function executeFlashArbitrage(
-        address asset,
-        uint256 amount,
-        ArbitrageTuple[] calldata tuples
-    ) external nonReentrant {
+    address asset,
+    uint256 amount,
+    ArbitrageTuple[] calldata tuples
+    ) external virtual nonReentrant {
         // CRITICAL FIX: Allow authorized executors instead of only owner
         require(authorizedExecutors[msg.sender] || msg.sender == owner(), "Unauthorized");
         require(!paused, "Paused");
@@ -194,11 +194,11 @@ contract FlashArb is ReentrancyGuard, Ownable {
      * @param params Encoded trade routes and nonce
      */
     function executeOperation(
-        address asset,
-        uint256 amount,
-        uint256 premium,
-        address initiator,
-        bytes calldata params
+            address asset,
+            uint256 amount,
+            uint256 premium,
+            address initiator,
+            bytes calldata params
     ) external virtual nonReentrant returns (bool) {
         require(msg.sender == address(aavePool), "Not Aave");
         require(initiator == address(this), "Invalid init");
@@ -245,7 +245,7 @@ contract FlashArb is ReentrancyGuard, Ownable {
      * @param routes Array of trade routes
      * @param borrowedAsset The asset that was borrowed for the flash loan
      */
-    function _executeArbitrageRoutesSecure(TradeRoute[] memory routes, address borrowedAsset) internal {
+    function _executeArbitrageRoutesSecure(TradeRoute[] memory routes, address borrowedAsset) internal virtual {
         for (uint256 i = 0; i < routes.length; i++) {
             TradeRoute memory route = routes[i];
 
@@ -494,4 +494,3 @@ contract FlashArb is ReentrancyGuard, Ownable {
 
     receive() external payable {}
 }
-
