@@ -58,6 +58,13 @@ module.exports = {
       gas: 8000000,
       timeout: 60000,
     },
+    // Arbitrum Sepolia Testnet (BEST for flash loan testing)
+    arbitrumSepolia: {
+      url: process.env.ARBITRUM_SEPOLIA_RPC_URL || "https://sepolia-rollup.arbitrum.io/rpc",
+      accounts: process.env.EVM_PRIVATE_KEY ? [process.env.EVM_PRIVATE_KEY] : [],
+      chainId: 421614,
+      timeout: 60000,
+    },
     // Optimism
     optimism: {
       url: process.env.OPTIMISM_RPC_URL || "https://opt-mainnet.g.alchemy.com/v2/YOUR_API_KEY",
@@ -72,12 +79,11 @@ module.exports = {
       gasPrice: 20000000000,
       gas: 8000000,
     },
-    // Localhost (for testing)
+    // Localhost (for testing with fork)
     localhost: {
       url: "http://127.0.0.1:8545",
-      accounts: process.env.EVM_PRIVATE_KEY ? [process.env.EVM_PRIVATE_KEY] : [],
-      gasPrice: 20000000000,
-      gas: 8000000,
+      // Don't specify accounts - use the fork's default accounts with 10,000 ETH
+      timeout: 60000,
     },
   },
   etherscan: {
@@ -87,6 +93,7 @@ module.exports = {
       goerli: process.env.ETHERSCAN_API_KEY,
       polygon: process.env.POLYGONSCAN_API_KEY,
       arbitrum: process.env.ARBISCAN_API_KEY,
+      arbitrumSepolia: process.env.ARBISCAN_API_KEY,
       optimism: process.env.OPTIMISTIC_ETHERSCAN_API_KEY,
     },
   },

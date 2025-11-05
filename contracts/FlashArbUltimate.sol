@@ -166,6 +166,7 @@ contract FlashArbUltimate is FlashArb {
     /**
      * @notice Enhanced executeOperation with production safety
      * @dev Overrides base callback with validation and circuit breaker
+     * @dev NO nonReentrant modifier - this is a legitimate callback from Aave
      */
     function executeOperation(
         address asset,
@@ -173,7 +174,8 @@ contract FlashArbUltimate is FlashArb {
         uint256 premium,
         address initiator,
         bytes calldata params
-    ) external override nonReentrant returns (bool) {
+    ) external override returns (bool) {
+        // CRITICAL: Only Aave can call this function
         require(msg.sender == address(aavePool), "Not Aave");
         require(initiator == address(this), "Invalid init");
         

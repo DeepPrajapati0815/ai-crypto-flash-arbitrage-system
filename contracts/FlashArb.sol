@@ -192,6 +192,7 @@ contract FlashArb is ReentrancyGuard, Ownable {
      * @param premium Flash loan fee
      * @param initiator Address that initiated the flash loan
      * @param params Encoded trade routes and nonce
+     * @dev NO nonReentrant modifier - this is a legitimate callback from Aave
      */
     function executeOperation(
             address asset,
@@ -199,7 +200,8 @@ contract FlashArb is ReentrancyGuard, Ownable {
             uint256 premium,
             address initiator,
             bytes calldata params
-    ) external virtual nonReentrant returns (bool) {
+    ) external virtual returns (bool) {
+        // CRITICAL: Only Aave can call this function
         require(msg.sender == address(aavePool), "Not Aave");
         require(initiator == address(this), "Invalid init");
         

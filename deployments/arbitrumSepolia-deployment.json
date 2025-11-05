@@ -1,0 +1,21 @@
+{
+  "network": "arbitrumSepolia",
+  "chainId": 421614,
+  "contractAddress": "0xf95AB161CD51909af19ccc881F9639caee38d0a3",
+  "deployer": "0x06C107E047ab8641510E689bE3F25afBD13F5D5e",
+  "timestamp": "2025-11-05T14:21:00.000Z",
+  "contracts": {
+    "FlashArbUltimate": "0xf95AB161CD51909af19ccc881F9639caee38d0a3"
+  },
+  "addresses": {
+    "aavePool": "0xBfC91D59fdAA134A4ED45f7B584cAf96D7792Eff",
+    "uniswapV3Router": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+    "sushiswapRouter": "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
+    "weth": "0x1dF462e2712496373A347f8ad10802a5E95f053D",
+    "usdc": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d"
+  },
+  "parameters": {
+    "minProfitWei": "1000000000000000",
+    "maxFailedAttempts": 5
+  }
+}

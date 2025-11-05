@@ -22,9 +22,9 @@ async function main() {
     console.log("Deployer Address:", deployerAddress);
     console.log("Deployer Balance:", ethers.formatEther(balance), "ETH");
     
-    // Validate minimum balance for deployment
+    // Validate minimum balance for deployment (skip for localhost/hardhat)
     const minBalance = ethers.parseEther("0.1"); // 0.1 ETH minimum
-    if (balance < minBalance) {
+    if (balance < minBalance && hre.network.name !== "localhost" && hre.network.name !== "hardhat") {
         throw new Error(`Insufficient balance. Need at least ${ethers.formatEther(minBalance)} ETH`);
     }
 
@@ -34,52 +34,55 @@ async function main() {
     console.log("Aave Pool:", networkConfig.aavePool);
     console.log("Uniswap V3 Router:", networkConfig.uniswapV3Router);
     console.log("Sushiswap Router:", networkConfig.sushiswapRouter);
-    console.log("Permit2:", networkConfig.permit2);
 
     // Validate all required addresses are set
     validateAddresses(networkConfig);
 
-    // Deploy FlashArbProductionSafe contract
+    // Deploy FlashArbUltimate contract
     console.log("\n============================================================");
     console.log("DEPLOYING FLASH ARBITRAGE CONTRACT");
     console.log("============================================================");
 
-    const FlashArbProductionSafe = await ethers.getContractFactory("FlashArbProductionSafe");
+    const FlashArbUltimate = await ethers.getContractFactory("FlashArbUltimate");
     
-    // Production-safe constructor parameters
-    const minProfitWei = ethers.parseEther("0.01"); // 0.01 ETH minimum profit
+    // Constructor parameters for FlashArbUltimate
+    const minProfitWei = ethers.parseEther("0.001"); // 0.001 ETH minimum profit (testnet)
+    const maxFailedAttempts = 5; // Max failed attempts before circuit breaker
     
     console.log("Constructor Parameters:");
     console.log("- Aave Pool:", networkConfig.aavePool);
     console.log("- Uniswap V3 Router:", networkConfig.uniswapV3Router);
     console.log("- Sushiswap Router:", networkConfig.sushiswapRouter);
-    console.log("- Permit2:", networkConfig.permit2);
     console.log("- Min Profit:", ethers.formatEther(minProfitWei), "ETH");
+    console.log("- Max Failed Attempts:", maxFailedAttempts);
 
     // Estimate gas before deployment
-    const deploymentData = FlashArbProductionSafe.interface.encodeDeploy([
+    const deploymentData = FlashArbUltimate.interface.encodeDeploy([
         networkConfig.aavePool,
         networkConfig.uniswapV3Router,
         networkConfig.sushiswapRouter,
-        networkConfig.permit2,
-        minProfitWei
+        minProfitWei,
+        maxFailedAttempts
     ]);
     
     const gasEstimate = await ethers.provider.estimateGas({
-        data: FlashArbProductionSafe.bytecode + deploymentData.slice(2)
+        data: FlashArbUltimate.bytecode + deploymentData.slice(2)
     });
     
+    const feeData = await ethers.provider.getFeeData();
+    const gasPrice = feeData.gasPrice || feeData.maxFeePerGas || ethers.parseUnits("1", "gwei");
+    
     console.log("Estimated Gas:", gasEstimate.toString());
-    console.log("Estimated Cost:", ethers.formatEther(gasEstimate * await ethers.provider.getGasPrice()), "ETH");
+    console.log("Estimated Cost:", ethers.formatEther(gasEstimate * gasPrice), "ETH");
 
     // Deploy the contract
     console.log("\nDeploying contract...");
-    const flashArb = await FlashArbProductionSafe.deploy(
+    const flashArb = await FlashArbUltimate.deploy(
         networkConfig.aavePool,
         networkConfig.uniswapV3Router,
         networkConfig.sushiswapRouter,
-        networkConfig.permit2,
         minProfitWei,
+        maxFailedAttempts,
         {
             gasLimit: gasEstimate * 120n / 100n, // 20% buffer
         }
@@ -107,17 +110,17 @@ async function main() {
     }
     console.log("✅ Contract code verified");
 
-    // Verify contract state
+    // Verify contract state (FlashArbUltimate specific)
     const owner = await flashArb.owner();
-    const minProfit = await flashArb.getMinProfitWei();
-    const isPaused = await flashArb.isEmergencyPaused();
-    const bundleOnlyMode = await flashArb.bundleOnlyMode();
+    const minProfit = await flashArb.minProfitWei();
+    const isPaused = await flashArb.paused();
+    const isHealthy = await flashArb.isHealthy();
 
     console.log("Contract State:");
     console.log("- Owner:", owner);
     console.log("- Min Profit:", ethers.formatEther(minProfit), "ETH");
-    console.log("- Emergency Paused:", isPaused);
-    console.log("- Bundle Only Mode:", bundleOnlyMode);
+    console.log("- Paused:", isPaused);
+    console.log("- Healthy:", isHealthy);
 
     if (owner !== deployerAddress) {
         throw new Error("Owner mismatch");
@@ -128,8 +131,8 @@ async function main() {
     if (isPaused !== false) {
         throw new Error("Contract should not be paused on deployment");
     }
-    if (bundleOnlyMode !== true) {
-        throw new Error("Bundle only mode should be enabled on deployment");
+    if (isHealthy !== true) {
+        throw new Error("Contract should be healthy on deployment");
     }
 
     console.log("✅ Contract state verified");
@@ -228,6 +231,16 @@ function getNetworkConfig(networkName) {
             sushiswapRouter: process.env.SUSHISWAP_ROUTER || "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
             permit2: process.env.PERMIT2_ADDRESS || "0x000000000022D473030F116dDEE9F6B43aC78BA3",
         },
+        arbitrumSepolia: {
+            // Official Aave V3 Arbitrum Sepolia addresses from https://github.com/bgd-labs/aave-address-book
+            aavePool: process.env.AAVE_POOL_ADDRESS || "0xBfC91D59fdAA134A4ED45f7B584cAf96D7792Eff",
+            // Uniswap V3 SwapRouter02 on Arbitrum Sepolia
+            uniswapV3Router: process.env.UNISWAP_V3_ROUTER || "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+            // Sushiswap V2 Router (fallback - may not exist on testnet)
+            sushiswapRouter: process.env.SUSHISWAP_ROUTER || "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
+            // Permit2 (universal across chains)
+            permit2: process.env.PERMIT2_ADDRESS || "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        },
         optimism: {
             aavePool: process.env.AAVE_POOL_ADDRESS || "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
             uniswapV3Router: process.env.UNISWAP_V3_ROUTER || "0xE592427A0AEce92De3Edee1F18E0157C05861564",
@@ -240,7 +253,7 @@ function getNetworkConfig(networkName) {
 }
 
 function validateAddresses(config) {
-    const requiredAddresses = ['aavePool', 'uniswapV3Router', 'sushiswapRouter', 'permit2'];
+    const requiredAddresses = ['aavePool', 'uniswapV3Router', 'sushiswapRouter'];
     
     for (const address of requiredAddresses) {
         if (!config[address] || config[address] === "0x0000000000000000000000000000000000000000") {
@@ -290,6 +303,7 @@ function getBlockExplorerUrl(networkName, address) {
         goerli: `https://goerli.etherscan.io/address/${address}`,
         polygon: `https://polygonscan.com/address/${address}`,
         arbitrum: `https://arbiscan.io/address/${address}`,
+        arbitrumSepolia: `https://sepolia.arbiscan.io/address/${address}`,
         optimism: `https://optimistic.etherscan.io/address/${address}`,
     };
     
